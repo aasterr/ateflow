@@ -22,7 +22,8 @@ def test_examples_are_listed():
     res = client.get("/api/examples")
     assert res.status_code == 200
     body = res.json()
-    assert set(body) == {"corridor", "hrisim"}
+    assert set(body) == {"corridor", "onboarding", "hrisim"}
+    assert body["onboarding"]["treatment"] == "onboarding_email"
     assert body["hrisim"]["treatment"] == "A"
     assert "->" in body["hrisim"]["dag"]
 

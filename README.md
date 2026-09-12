@@ -59,6 +59,30 @@ res = estimate_ate(df, DAG.from_file("examples/corridor.dag"),
 print(res.report(), res.sign_flip, res.confounding_bias)
 ```
 
+## Product analytics example
+
+Did the onboarding email raise 30-day retention? The growth team sent it
+mostly to the users it feared would churn — free plan, paid-ads signups — so
+the raw comparison says the email *hurts*:
+
+```bash
+python -m ateflow --data examples/onboarding.csv --dag examples/onboarding.dag \
+    --treatment onboarding_email --outcome retained_30d
+```
+
+```
+naive            ATE = -0.069   adjusting for: none
+g-computation    ATE = +0.090  95% CI [+0.067, +0.114]   adjusting for: channel, plan
+
+confounding bias : -0.158
+sign flip        : YES
+```
+
+The true effect is +9 retention points. The DAG also marks `active_week1` as
+a mediator: ateflow refuses to adjust for it, because doing so would recover
+only the direct +4 points and hide the half of the effect that works by
+bringing users back in their first week.
+
 ## Validation on real data
 
 `examples/episodes_100_v1.csv` holds the 100 HRI episodes of the

@@ -5,6 +5,7 @@ __pycache__/
 build/
 dist/
 examples/corridor.csv
+examples/onboarding.csv
 node_modules/
 ateflow/static/
 .claude/

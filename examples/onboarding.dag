@@ -1,0 +1,11 @@
+# Product analytics: does the onboarding email raise 30-day retention?
+# The growth team targeted the email by plan and acquisition channel,
+# and both also drive retention: they are confounders.
+plan -> onboarding_email
+channel -> onboarding_email
+plan -> retained_30d
+channel -> retained_30d
+onboarding_email -> retained_30d
+# First-week activity is a mediator: adjusting for it would hide
+# part of the effect the email actually has.
+onboarding_email -> active_week1 -> retained_30d

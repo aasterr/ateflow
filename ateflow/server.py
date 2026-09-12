@@ -32,6 +32,14 @@ EXAMPLES = {
         "outcome": "speed",
         "description": "Synthetic corridor scenario with a Simpson's paradox (true ATE +0.15).",
     },
+    "onboarding": {
+        "data": "onboarding.csv",
+        "dag": "onboarding.dag",
+        "treatment": "onboarding_email",
+        "outcome": "retained_30d",
+        "description": "Synthetic product analytics: does a targeted onboarding email "
+                       "raise 30-day retention? (true ATE +0.09)",
+    },
     "hrisim": {
         "data": "episodes_100_v1.csv",
         "dag": "hrisim.dag",
