@@ -2,11 +2,20 @@
 
 Causal effect estimation from a declarative DAG.
 
+[![ci](https://github.com/aasterr/ateflow/actions/workflows/ci.yml/badge.svg)](https://github.com/aasterr/ateflow/actions/workflows/ci.yml)
+[![live demo](https://img.shields.io/badge/demo-live-4459d8)](https://ateflow.onrender.com)
+[![license: MIT](https://img.shields.io/badge/license-MIT-1f7a4d)](LICENSE)
+
 **The question it answers, and only that one:** given a binary treatment and a DAG,
 how much does the outcome change net of confounders?
 
-Everything that does not serve this sentence stays out, at least for the first
-three months.
+Everything that does not serve this sentence stays out.
+
+**[Try it →](https://ateflow.onrender.com)** — draw the DAG, get the estimate.
+The demo runs on a free instance, so the first load may take a minute to wake
+up and an estimate takes a few seconds.
+
+![The DAG editor, with the naive and adjusted estimates side by side](docs/screenshot.png)
 
 ## Usage
 

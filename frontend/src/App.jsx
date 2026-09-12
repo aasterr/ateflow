@@ -336,6 +336,12 @@ export default function App() {
             <button className="primary" disabled={!ready || busy} onClick={run}>
               {busy ? "estimating…" : "Estimate ATE"}
             </button>
+            {busy && (
+              <p className="hint">
+                500 bootstrap resamples and the refutation tests — a few seconds
+                on the free demo instance.
+              </p>
+            )}
           </section>
         )}
 
