@@ -86,6 +86,21 @@ For development, run the API and `npm run dev` side by side: Vite proxies
 `/api/estimate`, `/api/dag/check`, `/api/columns`, `/api/examples` — docs at
 `/docs`.
 
+Analyses can be saved (dataset included, so they always reload) and exported
+as a standalone HTML report with the DAG drawn inline — ready to print to
+PDF. Storage is SQLite, stdlib only; set `ATEFLOW_DB` to move the file.
+
+## Deploy
+
+The Dockerfile builds the frontend and serves everything from one container:
+
+```bash
+docker build -t ateflow .
+docker run -p 8080:8080 -v ateflow_data:/data ateflow
+```
+
+`fly.toml` is included for Fly.io — see the comments at its top.
+
 ## What it does today
 
 - DAG with acyclicity checking and chain parsing (`a -> b -> c`)

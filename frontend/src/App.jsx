@@ -90,11 +90,19 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [savedList, setSavedList] = useState([]);
+  const [saveName, setSaveName] = useState("");
+  const [saving, setSaving] = useState(false);
   const fileRef = useRef(null);
+
+  const refreshSaved = useCallback(() => {
+    fetch("/api/analyses").then((r) => r.json()).then(setSavedList).catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch("/api/examples").then((r) => r.json()).then(setExamples).catch(() => {});
-  }, []);
+    refreshSaved();
+  }, [refreshSaved]);
 
   const columnNames = useMemo(() => nodes.map((n) => n.id), [nodes]);
   const dagText = useMemo(() => edgesToDagText(nodes, edges), [nodes, edges]);
@@ -191,20 +199,25 @@ export default function App() {
     []
   );
 
+  const questionForm = () => {
+    const form = new FormData();
+    form.append("dag", dagText);
+    form.append("treatment", treatment);
+    form.append("outcome", outcome);
+    form.append("method", method);
+    form.append("boot", "500");
+    if (source.kind === "file") form.append("file", source.file);
+    else if (source.kind === "saved") form.append("saved", source.id);
+    else form.append("example", source.name);
+    return form;
+  };
+
   const run = async () => {
     setBusy(true);
     setError("");
     setResult(null);
     try {
-      const form = new FormData();
-      form.append("dag", dagText);
-      form.append("treatment", treatment);
-      form.append("outcome", outcome);
-      form.append("method", method);
-      form.append("boot", "500");
-      if (source.kind === "file") form.append("file", source.file);
-      else form.append("example", source.name);
-      const res = await fetch("/api/estimate", { method: "POST", body: form });
+      const res = await fetch("/api/estimate", { method: "POST", body: questionForm() });
       const body = await res.json();
       if (!res.ok) setError(body.detail ?? "estimation failed");
       else setResult(body);
@@ -213,6 +226,41 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const saveAnalysis = async () => {
+    setSaving(true);
+    try {
+      const form = questionForm();
+      form.append("name", saveName || `${treatment} on ${outcome}`);
+      const res = await fetch("/api/analyses", { method: "POST", body: form });
+      if (!res.ok) setError((await res.json()).detail ?? "save failed");
+      else {
+        setSaveName("");
+        refreshSaved();
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const loadSaved = async (id) => {
+    const res = await fetch(`/api/analyses/${id}`);
+    if (!res.ok) return;
+    const a = await res.json();
+    buildGraph(a.columns.filter((c) => c !== "episode_id"), parseDagText(a.dag));
+    setTreatment(a.treatment);
+    setOutcome(a.outcome);
+    setMethod(a.method);
+    setSource({ kind: "saved", id: a.id, name: a.name });
+    setResult(a.result);
+    setError("");
+  };
+
+  const deleteSaved = async (id) => {
+    await fetch(`/api/analyses/${id}`, { method: "DELETE" });
+    if (source?.kind === "saved" && source.id === id) setSource(null);
+    refreshSaved();
   };
 
   const ready =
@@ -338,6 +386,38 @@ export default function App() {
                 other valid sets: {result.alternatives.slice(0, 3).map((s) => `{${s.join(", ")}}`).join("  ")}
               </p>
             )}
+            <div className="save-row">
+              <input
+                placeholder={`${treatment} on ${outcome}`}
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+              />
+              <button className="chip" disabled={saving} onClick={saveAnalysis}>
+                {saving ? "saving…" : "save"}
+              </button>
+            </div>
+          </section>
+        )}
+
+        {savedList.length > 0 && (
+          <section>
+            <h2>Saved analyses</h2>
+            <ul className="saved">
+              {savedList.map((a) => (
+                <li key={a.id}>
+                  <button className="link" onClick={() => loadSaved(a.id)} title="load">
+                    {a.name}
+                  </button>
+                  <span className="val">{a.adjusted >= 0 ? "+" : ""}{a.adjusted.toFixed(3)}</span>
+                  <a href={`/api/analyses/${a.id}/report`} target="_blank" rel="noreferrer">
+                    report
+                  </a>
+                  <button className="link danger" onClick={() => deleteSaved(a.id)}>
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
           </section>
         )}
 

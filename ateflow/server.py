@@ -14,12 +14,14 @@ from pathlib import Path
 
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import store
 from .api import Result, estimate_ate
 from .graph import DAG
+from .report import render_report
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
 EXAMPLES = {
@@ -109,6 +111,40 @@ def check_dag(req: DagCheckRequest) -> dict:
     return out
 
 
+async def _resolve_data(
+    file: UploadFile | None, example: str | None, saved: int | None = None
+) -> tuple[pd.DataFrame, bytes, str]:
+    """The dataset behind a request: uploaded CSV, bundled example, or saved analysis."""
+    if file is not None:
+        raw = await file.read()
+        return _read_csv(raw, file.filename or "upload"), raw, file.filename or "upload"
+    if example is not None:
+        spec = EXAMPLES.get(example)
+        if spec is None:
+            raise HTTPException(404, f"unknown example {example!r}")
+        raw = (EXAMPLES_DIR / spec["data"]).read_bytes()
+        return pd.read_csv(io.BytesIO(raw)), raw, f"example: {example}"
+    if saved is not None:
+        record = store.get_analysis(saved)
+        if record is None:
+            raise HTTPException(404, f"no analysis with id {saved}")
+        raw = record["csv"]
+        return _read_csv(raw, record["name"]), raw, record["source"]
+    raise HTTPException(422, "provide a CSV file, an example name, or a saved analysis id")
+
+
+def _run(data: pd.DataFrame, dag: str, treatment: str, outcome: str,
+         method: str, boot: int, refute: bool, seed: int) -> dict:
+    try:
+        result = estimate_ate(
+            data, dag, treatment=treatment, outcome=outcome,
+            method=method, n_boot=boot, refute=refute, seed=seed,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _result_payload(result)
+
+
 @app.post("/api/estimate")
 async def estimate(
     dag: str = Form(...),
@@ -120,32 +156,72 @@ async def estimate(
     refute: bool = Form(True),
     file: UploadFile | None = File(None),
     example: str | None = Form(None),
+    saved: int | None = Form(None),
 ) -> dict:
-    """Runs the full estimate on an uploaded CSV or on a bundled example dataset."""
-    if file is not None:
-        data = _read_csv(await file.read(), file.filename or "upload")
-    elif example is not None:
-        spec = EXAMPLES.get(example)
-        if spec is None:
-            raise HTTPException(404, f"unknown example {example!r}")
-        data = pd.read_csv(EXAMPLES_DIR / spec["data"])
-    else:
-        raise HTTPException(422, "provide a CSV file or an example name")
+    """Runs the full estimate on an uploaded CSV, a bundled example, or saved data."""
+    data, _, _ = await _resolve_data(file, example, saved)
+    return _run(data, dag, treatment, outcome, method, boot, refute, seed)
 
-    try:
-        result = estimate_ate(
-            data,
-            dag,
-            treatment=treatment,
-            outcome=outcome,
-            method=method,
-            n_boot=boot,
-            refute=refute,
-            seed=seed,
-        )
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    return _result_payload(result)
+
+@app.post("/api/analyses")
+async def save_analysis(
+    name: str = Form(...),
+    dag: str = Form(...),
+    treatment: str = Form(...),
+    outcome: str = Form(...),
+    method: str = Form("g-computation"),
+    boot: int = Form(500),
+    seed: int = Form(0),
+    file: UploadFile | None = File(None),
+    example: str | None = Form(None),
+    saved: int | None = Form(None),
+) -> dict:
+    """Runs the estimate and persists everything: dataset, DAG, question, result."""
+    data, raw, source = await _resolve_data(file, example, saved)
+    payload = _run(data, dag, treatment, outcome, method, boot, True, seed)
+    analysis_id = store.save_analysis(
+        name=name.strip() or "untitled",
+        source=source,
+        csv=raw,
+        dag=dag,
+        treatment=treatment,
+        outcome=outcome,
+        method=method,
+        result=payload,
+    )
+    return {"id": analysis_id}
+
+
+@app.get("/api/analyses")
+def analyses() -> list[dict]:
+    return store.list_analyses()
+
+
+@app.get("/api/analyses/{analysis_id}")
+def analysis(analysis_id: int) -> dict:
+    saved = store.get_analysis(analysis_id)
+    if saved is None:
+        raise HTTPException(404, f"no analysis with id {analysis_id}")
+    data = _read_csv(saved["csv"], saved["name"])
+    saved.pop("csv")
+    saved["columns"] = list(data.columns)
+    return saved
+
+
+@app.delete("/api/analyses/{analysis_id}")
+def delete_analysis(analysis_id: int) -> dict:
+    if not store.delete_analysis(analysis_id):
+        raise HTTPException(404, f"no analysis with id {analysis_id}")
+    return {"deleted": analysis_id}
+
+
+@app.get("/api/analyses/{analysis_id}/report")
+def report(analysis_id: int) -> HTMLResponse:
+    """Standalone HTML report, ready to share or print to PDF."""
+    saved = store.get_analysis(analysis_id)
+    if saved is None:
+        raise HTTPException(404, f"no analysis with id {analysis_id}")
+    return HTMLResponse(render_report(saved))
 
 
 @app.get("/api/examples")
