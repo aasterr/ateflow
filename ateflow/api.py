@@ -15,6 +15,8 @@ from .estimate import (
     Estimate,
     aipw,
     bootstrap_ci,
+    frontdoor_formula,
+    frontdoor_g_computation,
     g_computation,
     ipw,
     naive,
@@ -33,6 +35,8 @@ class Result:
     alternatives: list[list[str]]
     refutations: list[dict]
     data_report: dict = field(default_factory=dict)
+    strategy: str = "backdoor"
+    explanation: list[str] = field(default_factory=list)
 
     @property
     def confounding_bias(self) -> float:
@@ -56,9 +60,13 @@ class Result:
             for w in rep["warnings"]:
                 lines.append(f"warning          : {w}")
             lines.append("")
+        adjusted = f"{self.adjusted}"
+        if self.strategy == "frontdoor":
+            lines.append(f"identified by    : front-door through {{{', '.join(self.adjustment_set)}}}")
+            adjusted = adjusted.replace("adjusting for:", "through:")
         lines += [
             f"{self.naive}",
-            f"{self.adjusted}",
+            adjusted,
             "",
             f"confounding bias : {self.confounding_bias:+.3f}",
             f"sign flip        : {'YES' if self.sign_flip else 'no'}",
@@ -88,49 +96,71 @@ def estimate_ate(
     treated_value: str | None = None,
     outcome_positive: str | None = None,
 ) -> Result:
-    """Estimates the ATE, identifying the adjustment set from the DAG.
+    """Estimates the ATE, identifying from the DAG how it can be computed.
 
     `dag` accepts a DAG object or the text in 'A -> B' format directly.
-    If `adjustment_set` is given, it is validated against the backdoor
-    criterion instead of being searched for.
+    Identification tries backdoor adjustment first and front-door when an
+    unmeasured confounder leaves no measured adjustment set; `Result.strategy`
+    and `Result.explanation` say which and why. If `adjustment_set` is given,
+    it is validated against the backdoor criterion instead of being searched for.
 
     The data go through `data.prepare` first: incomplete rows are dropped,
     a two-valued treatment is coded 0/1 (`treated_value` says which value is
-    the treatment when the labels do not), and unusable confounders are
+    the treatment when the labels do not), and unusable variables are
     refused. What happened is in `Result.data_report`.
     """
     graph = dag if isinstance(dag, DAG) else DAG.parse(dag)
 
-    missing = (graph.nodes - set(data.columns)) - {"_rcc"}
+    missing = (graph.observed - set(data.columns)) - {"_rcc"}
     if missing:
-        raise ValueError(f"DAG variables missing from the data: {sorted(missing)}")
-    for name in (treatment, outcome):
-        if name not in graph.nodes:
-            raise ValueError(f"{name!r} does not appear in the DAG")
+        raise ValueError(
+            f"DAG variables missing from the data: {sorted(missing)}. If they are real "
+            "but not measured, declare them with a line 'unmeasured: name'"
+        )
 
     if adjustment_set is None:
-        chosen = sorted(graph.minimal_backdoor_set(treatment, outcome))
+        ident = graph.identify(treatment, outcome)
+        if ident["strategy"] is None:
+            raise ValueError(" ".join(ident["explanation"]))
     else:
+        for name in (treatment, outcome):
+            if name not in graph.nodes:
+                raise ValueError(f"{name!r} does not appear in the DAG")
         if not graph.satisfies_backdoor(treatment, outcome, adjustment_set):
             raise ValueError(
                 f"{sorted(adjustment_set)} does not satisfy the backdoor criterion for "
                 f"{treatment} -> {outcome}"
             )
-        chosen = sorted(adjustment_set)
+        ident = {"strategy": "backdoor", "variables": sorted(adjustment_set), "alternatives": [],
+                 "explanation": [f"Adjusting for the given set {{{', '.join(sorted(adjustment_set))}}}, "
+                                 "which satisfies the backdoor criterion."]}
+    strategy, chosen = ident["strategy"], ident["variables"]
 
     estimators = {
-        "g-computation": g_computation,
-        "adjustment-formula": adjustment_formula,
-        "ipw": ipw,
-        "aipw": aipw,
-    }
+        "backdoor": {
+            "g-computation": g_computation,
+            "adjustment-formula": adjustment_formula,
+            "ipw": ipw,
+            "aipw": aipw,
+        },
+        "frontdoor": {
+            "g-computation": frontdoor_g_computation,
+            "adjustment-formula": frontdoor_formula,
+        },
+    }[strategy]
     if method not in estimators:
+        if strategy == "frontdoor" and method in ("ipw", "aipw"):
+            raise ValueError(
+                f"{method.upper()} weights by the probability of treatment given confounders, "
+                "and here the confounder is unmeasured. For this front-door question use the "
+                "adjustment formula or g-computation"
+            )
         raise ValueError(f"unknown method {method!r}, use one of {sorted(estimators)}")
     fn = estimators[method]
 
     data, data_report = prepare(
         data, treatment, outcome, chosen, method=method,
-        treated_value=treated_value, outcome_positive=outcome_positive,
+        treated_value=treated_value, outcome_positive=outcome_positive, strategy=strategy,
     )
 
     def run(frame: pd.DataFrame, extra: list[str] | None = None) -> Estimate:
@@ -143,21 +173,20 @@ def estimate_ate(
     refutations: list[dict] = []
     if refute:
         refutations.append(refute_placebo_treatment(run, data, treatment, seed=seed))
-        refutations.append(
-            refute_random_common_cause(
-                lambda frame, extra: run(frame, extra), data, adjusted.value, seed=seed
+        if strategy == "backdoor":  # an extra "confounder" only means something for adjustment
+            refutations.append(
+                refute_random_common_cause(
+                    lambda frame, extra: run(frame, extra), data, adjusted.value, seed=seed
+                )
             )
-        )
 
-    alternatives = [
-        s for s in graph.backdoor_sets(treatment, outcome, max_size=len(chosen) + 1)
-        if sorted(s) != chosen
-    ]
     return Result(
         naive=naive(data, treatment, outcome),
         adjusted=adjusted,
         adjustment_set=chosen,
-        alternatives=alternatives,
+        alternatives=[set(a) for a in ident["alternatives"]],
         refutations=refutations,
         data_report=data_report,
+        strategy=strategy,
+        explanation=ident["explanation"],
     )

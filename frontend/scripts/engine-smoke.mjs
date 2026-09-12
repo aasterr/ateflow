@@ -59,6 +59,18 @@ for (const method of ["adjustment-formula", "g-computation", "ipw", "aipw"]) {
   expect(`onboarding ${method}`, r.adjusted.value, 0.09, 0.01);
 }
 
+// front-door: the confounder is unmeasured, the effect goes through a site visit
+for (const method of ["adjustment-formula", "g-computation"]) {
+  t = performance.now();
+  const r = call("estimate", { example: "ads", dag: dag("ads"), treatment: "saw_ad", outcome: "purchased", method, boot: 500, refute: true });
+  lap(`ads front-door ${method} (500 boot)`);
+  if (r.strategy !== "frontdoor") failures++;
+  expect(`ads front-door ${method}`, r.adjusted.value, 0.15, 0.02);
+}
+const blocked = JSON.parse(handle("estimate", JSON.stringify({ example: "ads", dag: dag("ads") + "\nsaw_ad -> purchased", treatment: "saw_ad", outcome: "purchased" }), null));
+console.log(`${blocked.status === 422 && blocked.error.includes("not identifiable") ? "ok  " : "FAIL"} not identifiable is refused with a reason`);
+if (blocked.status !== 422) failures++;
+
 // continuous confounder: the logistic propensity path, the slow one in WebAssembly
 let seed = 1;
 const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);

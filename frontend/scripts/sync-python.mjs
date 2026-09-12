@@ -18,7 +18,7 @@ const examples = readdirSync(join(root, "examples"))
   .filter((f) => f.endsWith(".csv") || f.endsWith(".dag"))
   .map((f) => `examples/${f}`);
 
-for (const needed of ["examples/corridor.csv", "examples/onboarding.csv"]) {
+for (const needed of ["examples/corridor.csv", "examples/onboarding.csv", "examples/ads.csv"]) {
   if (!examples.includes(needed)) {
     console.error(`missing ${needed}: run \`python examples/make_data.py\` first`);
     process.exit(1);

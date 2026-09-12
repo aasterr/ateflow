@@ -6,6 +6,7 @@ build/
 dist/
 examples/corridor.csv
 examples/onboarding.csv
+examples/ads.csv
 node_modules/
 ateflow/static/
 .claude/

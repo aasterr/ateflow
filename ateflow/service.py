@@ -111,6 +111,44 @@ EXAMPLES = {
             ],
         },
     },
+    "ads": {
+        "data": "ads.csv",
+        "dag": "ads.dag",
+        "treatment": "saw_ad",
+        "outcome": "purchased",
+        "description": "Synthetic front-door case: the confounder is unmeasured, the "
+                       "effect runs through a site visit (true ATE +0.15).",
+        "guide": {
+            "title": "Does the ad make people buy? (front-door)",
+            "story": "Synthetic users who saw an ad or not, whether they visited the site, "
+                     "whether they bought. The dashed node, purchase intent, is not in the "
+                     "data. True effect of the ad: +0.15.",
+            "why": "The targeting reaches people who were shopping anyway, so buyers are "
+                   "over-represented among those who saw the ad: compared as they are, the "
+                   "ad looks worth +0.42. Intent cannot be adjusted for because it was never "
+                   "measured. But the ad acts only through the visit, and nothing else "
+                   "decides the visit: ateflow rebuilds the effect in two steps, ad → visit "
+                   "and visit → purchase holding the ad fixed, and gets +0.15.",
+            "tries": [
+                {
+                    "text": "Remove intent → saw_ad. Nothing seems to confound the ad any "
+                            "more, ateflow uses no adjustment and reports the biased +0.42.",
+                    "edit": {"op": "remove", "edge": ["intent", "saw_ad"]}, "expect": 0.422,
+                },
+                {
+                    "text": "Add intent → visited_site. Now intent also drives the visit, the "
+                            "front-door criterion fails, and ateflow says the effect cannot "
+                            "be identified from these data instead of guessing.",
+                    "edit": {"op": "add", "edge": ["intent", "visited_site"]}, "expect": None,
+                },
+                {
+                    "text": "Add saw_ad → purchased. The ad now also works directly, so the "
+                            "visit no longer carries the whole effect: not identifiable either.",
+                    "edit": {"op": "add", "edge": ["saw_ad", "purchased"]}, "expect": None,
+                },
+            ],
+        },
+    },
     "hrisim": {
         "data": "episodes_100_v1.csv",
         "dag": "hrisim.dag",
@@ -164,6 +202,8 @@ def result_payload(result: Result) -> dict:
         "confounding_bias": result.confounding_bias,
         "sign_flip": result.sign_flip,
         "data_report": result.data_report,
+        "strategy": result.strategy,
+        "explanation": result.explanation,
         "report": result.report(),
     }
 
@@ -196,22 +236,16 @@ def check_dag(dag: str, treatment: str | None = None, outcome: str | None = None
     out: dict = {
         "nodes": sorted(graph.nodes),
         "edges": graph.edges,
-        "missing_columns": sorted(graph.nodes - set(columns)) if columns else [],
+        "unmeasured": sorted(graph.unmeasured),
+        "missing_columns": sorted(graph.observed - set(columns)) if columns else [],
     }
     if treatment and outcome:
-        for name in (treatment, outcome):
-            if name not in graph.nodes:
-                raise ServiceError(422, f"{name!r} does not appear in the DAG")
         try:
-            minimal = sorted(graph.minimal_backdoor_set(treatment, outcome))
+            ident = graph.identify(treatment, outcome)
         except ValueError as exc:
             raise ServiceError(422, str(exc)) from exc
-        out["minimal_adjustment_set"] = minimal
-        out["alternatives"] = [
-            sorted(s)
-            for s in graph.backdoor_sets(treatment, outcome, max_size=len(minimal) + 1)
-            if sorted(s) != minimal
-        ]
+        # not identifiable is an answer, not an error: the explanation says why
+        out.update(ident)
     return out
 
 

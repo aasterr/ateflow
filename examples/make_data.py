@@ -75,9 +75,30 @@ def make_onboarding(n: int = 8000, seed: int = 11) -> pd.DataFrame:
     })
 
 
+ADS_TRUE_ATE = 0.30 * 0.50  # ad -> visit (+0.50), visit -> purchase (+0.30)
+
+
+def make_ads(n: int = 6000, seed: int = 23) -> pd.DataFrame:
+    """Front-door case: purchase intent is unmeasured and confounds ad and purchase.
+
+    The ad targeting reaches people already shopping, so the naive comparison
+    overstates the ad. The ad acts only through a site visit, and nothing but
+    the ad drives the visit: the front-door criterion holds for {visited_site}.
+    """
+    rng = np.random.default_rng(seed)
+    intent = rng.binomial(1, 0.4, n)                          # never written to the CSV
+    ad = rng.binomial(1, 0.15 + 0.60 * intent)
+    visit = rng.binomial(1, 0.10 + 0.50 * ad)
+    purchase = rng.binomial(1, 0.05 + 0.30 * visit + 0.45 * intent)
+    region = rng.choice(["north", "center", "south"], n)      # irrelevant, as real files have
+    return pd.DataFrame({"saw_ad": ad, "visited_site": visit, "purchased": purchase, "region": region})
+
+
 if __name__ == "__main__":
     here = Path(__file__).resolve().parent
     make().to_csv(here / "corridor.csv", index=False)
     print("wrote examples/corridor.csv    (true ATE =", TRUE_ATE, ")")
+    make_ads().to_csv(here / "ads.csv", index=False)
+    print("wrote examples/ads.csv         (true ATE =", round(ADS_TRUE_ATE, 4), ")")
     make_onboarding().to_csv(here / "onboarding.csv", index=False)
     print("wrote examples/onboarding.csv  (true ATE =", round(ONBOARDING_TRUE_ATE, 4), ")")

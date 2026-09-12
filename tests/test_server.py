@@ -22,7 +22,7 @@ def test_examples_are_listed():
     res = client.get("/api/examples")
     assert res.status_code == 200
     body = res.json()
-    assert set(body) == {"corridor", "onboarding", "hrisim"}
+    assert set(body) == {"corridor", "onboarding", "ads", "hrisim"}
     assert body["onboarding"]["treatment"] == "onboarding_email"
     assert body["hrisim"]["treatment"] == "A"
     assert "->" in body["hrisim"]["dag"]
@@ -31,9 +31,11 @@ def test_examples_are_listed():
 def _apply_edit(dag_text: str, edit: dict) -> str:
     """Mirror of the frontend's guide edits, on the DAG text."""
     src, dst = edit["edge"]
+    lines = [line.split("#")[0] for line in dag_text.splitlines()]
+    keep = [line for line in lines if line.strip() and "->" not in line]  # unmeasured: ...
     edges = [(s.strip(), d.strip()) for s, d in
-             (pair for line in dag_text.splitlines()
-              for chain in [line.split("#")[0].split("->")]
+             (pair for line in lines
+              for chain in [line.split("->")]
               for pair in zip(chain, chain[1:]))]
     if edit["op"] == "add":
         assert (src, dst) not in edges, f"{src} -> {dst} already in the DAG"
@@ -43,7 +45,7 @@ def _apply_edit(dag_text: str, edit: dict) -> str:
         edges.remove((src, dst))
         if edit["op"] == "flip":
             edges.append((dst, src))
-    return "\n".join(f"{s} -> {d}" for s, d in edges)
+    return "\n".join([f"{s} -> {d}" for s, d in edges] + keep)
 
 
 def test_guide_edits_produce_the_quoted_numbers():
@@ -57,6 +59,10 @@ def test_guide_edits_produce_the_quoted_numbers():
                 "outcome": spec["outcome"], "method": "adjustment-formula",
                 "example": name, "boot": 0, "refute": False,
             })
+            if tip["expect"] is None:  # the guide promises "not identifiable"
+                assert res.status_code == 422, (name, tip["edit"], res.text)
+                assert "not identifiable" in res.json()["detail"]
+                continue
             assert res.status_code == 200, (name, tip["edit"], res.text)
             assert res.json()["adjusted"]["value"] == pytest.approx(tip["expect"], abs=5e-3), (
                 name, tip["edit"])
@@ -69,7 +75,8 @@ def test_dag_check_identifies_minimal_set():
     })
     assert res.status_code == 200
     body = res.json()
-    assert body["minimal_adjustment_set"] == ["O"]
+    assert (body["strategy"], body["variables"]) == ("backdoor", ["O"])
+    assert any("blocked at O" in line for line in body["explanation"])
     assert body["missing_columns"] == ["O"]
 
 

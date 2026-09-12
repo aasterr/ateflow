@@ -86,6 +86,36 @@ a mediator: ateflow refuses to adjust for it, because doing so would recover
 only the direct +4 points and hide the half of the effect that works by
 bringing users back in their first week.
 
+## Unmeasured confounders: front-door
+
+Did seeing the ad make people buy? Ad targeting reaches people who were
+shopping anyway, and that purchase intent is not in the data. No adjustment
+can remove it, so ateflow looks for a front-door: the ad works only through a
+site visit, and nothing else decides the visit.
+
+```
+intent -> saw_ad
+intent -> purchased
+unmeasured: intent
+saw_ad -> visited_site -> purchased
+```
+
+```bash
+python -m ateflow --data examples/ads.csv --dag examples/ads.dag \
+    --treatment saw_ad --outcome purchased --method adjustment-formula
+```
+
+```
+identified by    : front-door through {visited_site}
+naive            ATE = +0.422   adjusting for: none
+adjustment-formula ATE = +0.153  95% CI [+0.137, +0.172]   through: visited_site
+```
+
+The true effect is +0.15; the naive comparison nearly triples it. Identification
+always tries backdoor adjustment first, falls back to front-door, and otherwise
+refuses with the path that makes the effect unidentifiable — in the app, the
+"why?" link next to the identification line opens that explanation.
+
 ## Validation on real data
 
 `examples/episodes_100_v1.csv` holds the 100 HRI episodes of the
@@ -173,7 +203,12 @@ docker run -p 8080:8080 -v ateflow_data:/data ateflow
 
 - DAG with acyclicity checking and chain parsing (`a -> b -> c`)
 - d-separation by moralization of the ancestral subgraph
-- Pearl's backdoor criterion, search for the minimal set and the alternative sets
+- Pearl's backdoor criterion, search for the minimal set and the alternative sets,
+  restricted to the ancestors of treatment and outcome so wide datasets stay fast
+- unmeasured variables (`unmeasured: name`) and Pearl's front-door criterion,
+  estimated with the front-door formula or a linear two-step model
+- a plain-language explanation of the identification: which paths are
+  blocked and where, or why the effect cannot be identified
 - explicit refusal of mediators, colliders, and descendants of the treatment
 - estimation by g-computation (with T*Z interactions) and by the adjustment formula (exact within groups of confounder values)
 - inverse probability weighting and doubly robust AIPW, with overlap
@@ -185,7 +220,7 @@ docker run -p 8080:8080 -v ateflow_data:/data ateflow
 
 ## What it does not do (by choice)
 
-Non-binary treatments, longitudinal data, front-door, instrumental variables,
+Non-binary treatments, longitudinal data, instrumental variables,
 causal discovery, heterogeneous effects by subgroup. They are extensions, not
 requirements.
 

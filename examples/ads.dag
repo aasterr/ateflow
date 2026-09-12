@@ -1,0 +1,9 @@
+# Front-door: does seeing the ad make people buy?
+# Purchase intent drives both who the targeting reaches and who buys,
+# and it is not in the data: no adjustment can remove it.
+intent -> saw_ad
+intent -> purchased
+unmeasured: intent
+# The ad works only by bringing people to the site, and nothing else
+# (intent included) decides the visit.
+saw_ad -> visited_site -> purchased

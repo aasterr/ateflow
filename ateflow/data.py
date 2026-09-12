@@ -203,8 +203,12 @@ def prepare(
     method: str = "g-computation",
     treated_value: str | None = None,
     outcome_positive: str | None = None,
+    strategy: str = "backdoor",
 ) -> tuple[pd.DataFrame, dict]:
     """The rows and columns a question needs, coerced to what the estimators expect.
+
+    `adjustment_set` holds the variables the identification uses besides
+    treatment and outcome: confounders for backdoor, mediators for front-door.
 
     Rows with a missing value in any used column are dropped (complete cases)
     and counted per column. Everything that cannot be fixed safely raises a
@@ -263,9 +267,11 @@ def prepare(
         if kind == "constant":
             warnings.append(f"{c!r} never varies in the rows used: adjusting for it changes nothing")
         if method == "adjustment-formula" and kind == "continuous":
+            role = "mediators" if strategy == "frontdoor" else "confounders"
+            others = "g-computation" if strategy == "frontdoor" else "g-computation, IPW or AIPW"
             raise DataError(
-                f"the adjustment formula needs discrete confounders, and {c!r} has "
-                f"{work[c].nunique()} distinct values. Use g-computation, IPW or AIPW, "
+                f"the adjustment formula needs discrete {role}, and {c!r} has "
+                f"{work[c].nunique()} distinct values. Use {others}, "
                 "or bin it into a few groups"
             )
 

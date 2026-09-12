@@ -19,7 +19,7 @@ def call(op, payload=None, raw=None):
 
 def test_examples_and_estimate_by_example_name():
     examples = call("examples")["ok"]
-    assert set(examples) == {"corridor", "onboarding", "hrisim"}
+    assert set(examples) == {"corridor", "onboarding", "ads", "hrisim"}
     out = call("estimate", {"example": "hrisim", "dag": HRISIM_DAG, "treatment": "A",
                             "outcome": "T", "method": "adjustment-formula", "boot": 0,
                             "refute": False})["ok"]

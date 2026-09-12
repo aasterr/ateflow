@@ -34,10 +34,24 @@ function parseDagText(text) {
   return edges;
 }
 
+/* Names listed on an `unmeasured: a, b` line: variables in the causal story with no column. */
+function parseUnmeasured(text) {
+  const names = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.split("#")[0].trim();
+    if (line.toLowerCase().startsWith("unmeasured:")) {
+      names.push(...line.slice("unmeasured:".length).split(",").map((t) => t.trim()).filter(Boolean));
+    }
+  }
+  return names;
+}
+
 function edgesToDagText(nodes, edges) {
   const connected = new Set(edges.flatMap((e) => [e.source, e.target]));
   const lines = edges.map((e) => `${e.source} -> ${e.target}`);
-  for (const n of nodes) if (!connected.has(n.id)) lines.push(n.id);
+  for (const n of nodes) if (!connected.has(n.id) && !n.data.unmeasured) lines.push(n.id);
+  const hidden = nodes.filter((n) => n.data.unmeasured).map((n) => n.id);
+  if (hidden.length) lines.push(`unmeasured: ${hidden.join(", ")}`);
   return lines.join("\n");
 }
 
@@ -144,11 +158,12 @@ function borderPoint(box, tx, ty, gap = 0) {
 /* The whole body is the connection handle: press on a variable and drag to
    another one. Where the drag starts is the cause, where it ends the effect.
    Nodes move by their grip, so the two gestures never compete. */
-function VariableNode({ id, data }) {
+function VariableNode({ id, data, selected }) {
   const connection = useConnection();
+  const { deleteElements } = useReactFlow();
   const isTarget = connection.inProgress && connection.fromNode.id !== id;
   return (
-    <div className={`var-node ${data.role}`}>
+    <div className={`var-node ${data.role} ${data.unmeasured ? "unmeasured" : ""}`}>
       <div className="grip" title="drag to move">⋮⋮</div>
       <div className="var-body">
         {/* Both handles stay mounted (edges need them to render); only the
@@ -165,7 +180,17 @@ function VariableNode({ id, data }) {
           isConnectableStart={false}
         />
         <span>{data.label}</span>
+        {data.unmeasured && <em className="tag">unmeasured</em>}
       </div>
+      {data.unmeasured && selected && (
+        <button
+          className="node-delete nodrag"
+          title="remove this unmeasured variable"
+          onClick={() => deleteElements({ nodes: [{ id }] })}
+        >
+          ×
+        </button>
+      )}
     </div>
   );
 }
@@ -258,6 +283,11 @@ const KIND_NOTE = {
   constant: "never varies",
   empty: "all missing",
 };
+const IDENT_SUMMARY = {
+  backdoor: "How the effect is identified: backdoor adjustment",
+  frontdoor: "How the effect is identified: front-door criterion",
+  none: "Why the effect is not identifiable",
+};
 const LEFT_OUT = new Set(["identifier", "text", "constant", "empty"]);
 const usableColumns = (profile) => profile.filter((p) => !LEFT_OUT.has(p.kind)).map((p) => p.name);
 
@@ -295,6 +325,7 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [resultKey, setResultKey] = useState("");
   const [guideOpen, setGuideOpen] = useState(true);
+  const [identOpen, setIdentOpen] = useState(false);
   const [profile, setProfile] = useState([]); // one entry per CSV column, from the server
   const [dataInfo, setDataInfo] = useState(null); // what was detected reading an upload
   const [treatedValue, setTreatedValue] = useState("");
@@ -327,7 +358,9 @@ export default function App() {
   }, [bootEngine, refreshSaved]);
   const engineReady = engineStage === "ready" && !engineError;
 
-  const columnNames = useMemo(() => nodes.map((n) => n.id), [nodes]);
+  // measured variables only: unmeasured ones have no column and cannot be treatment or outcome
+  const columnNames = useMemo(() => nodes.filter((n) => !n.data.unmeasured).map((n) => n.id), [nodes]);
+  const unmeasuredNames = useMemo(() => nodes.filter((n) => n.data.unmeasured).map((n) => n.id), [nodes]);
   const dagText = useMemo(() => edgesToDagText(nodes, edges), [nodes, edges]);
   const currentKey = questionKey(
     edges.map((e) => [e.source, e.target]), treatment, outcome, method, treatedValue, outcomePositive
@@ -370,12 +403,14 @@ export default function App() {
   };
   const stale = result && resultKey !== currentKey;
   const guide = source?.kind === "example" ? examples[source.name]?.guide : null;
+  const frontdoor = check?.strategy === "frontdoor";
+  const panelTitle = source?.kind === "file" ? "Data check" : guide ? "About this example" : "Identification";
 
   const roleOf = useCallback(
     (name) => {
       if (name === treatment) return "treatment";
       if (name === outcome) return "outcome";
-      if (check?.minimal?.includes(name)) return "adjust";
+      if (check?.variables?.includes(name)) return "adjust";
       return "plain";
     },
     [treatment, outcome, check]
@@ -385,7 +420,8 @@ export default function App() {
     setNodes((ns) => ns.map((n) => ({ ...n, data: { ...n.data, role: roleOf(n.id) } })));
   }, [roleOf]);
 
-  const buildGraph = useCallback((names, pairs) => {
+  const buildGraph = useCallback((measured, pairs, unmeasured = []) => {
+    const names = [...measured, ...unmeasured.filter((u) => !measured.includes(u))];
     const pos = layout(names, pairs);
     setGraphKey((k) => k + 1); // remount the canvas so fitView frames the new graph
     setNodes(
@@ -393,9 +429,9 @@ export default function App() {
         id: name,
         type: "variable",
         position: pos[name],
-        deletable: false,
+        deletable: unmeasured.includes(name),
         dragHandle: ".grip",
-        data: { label: name, role: "plain" },
+        data: { label: name, role: "plain", unmeasured: unmeasured.includes(name) },
       }))
     );
     setEdges(
@@ -408,7 +444,7 @@ export default function App() {
   const loadExample = (name) => {
     const ex = examples[name];
     if (!ex) return;
-    buildGraph(usableColumns(ex.profile), parseDagText(ex.dag));
+    buildGraph(usableColumns(ex.profile), parseDagText(ex.dag), parseUnmeasured(ex.dag));
     setProfile(ex.profile);
     setDataInfo(null);
     setTreatment(ex.treatment);
@@ -451,7 +487,7 @@ export default function App() {
     const timer = setTimeout(() => {
       engine
         .check({ dag: dagText, treatment, outcome, columns: columnKey ? columnKey.split("|") : [] })
-        .then((body) => !cancelled && setCheck({ minimal: body.minimal_adjustment_set }))
+        .then((body) => !cancelled && setCheck(body))
         .catch((err) => !cancelled && setCheck({ error: err.message }));
     }, 150);
     return () => {
@@ -533,7 +569,7 @@ export default function App() {
       const a = await store.get(id);
       if (!a) return;
       const data = a.csv ? await engine.inspect(a.csv, a.name) : examples[a.example];
-      buildGraph(usableColumns(data.profile), parseDagText(a.dag));
+      buildGraph(usableColumns(data.profile), parseDagText(a.dag), parseUnmeasured(a.dag));
       setProfile(data.profile);
       setDataInfo(null);
       setTreatment(a.treatment);
@@ -577,16 +613,62 @@ export default function App() {
   };
 
   const ready =
-    source && treatment && outcome && treatment !== outcome && edges.length > 0 && !check?.error &&
+    source && treatment && outcome && treatment !== outcome && edges.length > 0 && check?.strategy &&
+    !(frontdoor && (method === "ipw" || method === "aipw")) &&
     !treatmentInfo?.error && !outcomeInfo?.error &&
     !(treatmentInfo?.values && !treatedValue) && !(outcomeInfo?.values && !outcomePositive);
+
+  useEffect(() => {
+    // weighting needs measured confounders: move off it when the question turns front-door
+    if (frontdoor && (method === "ipw" || method === "aipw")) setMethod("adjustment-formula");
+  }, [frontdoor, method]);
+  useEffect(() => {
+    // the interesting cases open the explanation by themselves
+    setIdentOpen(Boolean(check?.explanation) && check.strategy !== "backdoor");
+  }, [check?.strategy, check?.explanation]);
+
+  const showWhy = () => {
+    setGuideOpen(true);
+    setIdentOpen(true);
+  };
+
+  const addUnmeasured = () => {
+    const raw = window.prompt("Name of the unmeasured variable (e.g. motivation)");
+    if (raw == null) return;
+    const name = raw.trim().replace(/\s+/g, " ");
+    if (!name || /[,#:]|->/.test(name)) {
+      setError("an unmeasured variable needs a name without commas, colons, '#' or '->'");
+      return;
+    }
+    if (nodes.some((n) => n.id === name)) {
+      setError(`${name} is already in the DAG`);
+      return;
+    }
+    setError("");
+    const xs = nodes.map((n) => n.position.x);
+    const ys = nodes.map((n) => n.position.y);
+    const position = nodes.length
+      ? { x: Math.min(...xs), y: Math.max(...ys) + 110 }
+      : { x: 0, y: 0 };
+    setNodes((ns) => [
+      ...ns,
+      {
+        id: name,
+        type: "variable",
+        position,
+        deletable: true,
+        dragHandle: ".grip",
+        data: { label: name, role: "plain", unmeasured: true },
+      },
+    ]);
+  };
 
   /* Upload only: add or remove a column from the canvas, keeping the arrows among the rest. */
   const toggleColumn = (name) => {
     const names = columnNames.includes(name)
       ? columnNames.filter((c) => c !== name)
       : profile.map((p) => p.name).filter((c) => c === name || columnNames.includes(c));
-    buildGraph(names, edges.map((e) => [e.source, e.target]));
+    buildGraph(names, edges.map((e) => [e.source, e.target]), unmeasuredNames);
     if (!names.includes(treatment)) setTreatment("");
     if (!names.includes(outcome)) setOutcome("");
   };
@@ -691,13 +773,30 @@ export default function App() {
               <select value={method} onChange={(e) => setMethod(e.target.value)}>
                 <option value="adjustment-formula">adjustment formula</option>
                 <option value="g-computation">g-computation</option>
-                <option value="ipw">IPW (weighting)</option>
-                <option value="aipw">AIPW (doubly robust)</option>
+                <option value="ipw" disabled={frontdoor}>
+                  IPW (weighting){frontdoor ? " — backdoor only" : ""}
+                </option>
+                <option value="aipw" disabled={frontdoor}>
+                  AIPW (doubly robust){frontdoor ? " — backdoor only" : ""}
+                </option>
               </select>
             </label>
-            {check?.minimal && (
+            {check?.strategy === "backdoor" && (
               <p className="hint ok">
-                identified — adjusting for {"{"}{check.minimal.join(", ") || "∅"}{"}"}
+                identified — adjusting for {"{"}{check.variables.join(", ") || "∅"}{"}"}{" "}
+                <button className="link why" onClick={showWhy}>why?</button>
+              </p>
+            )}
+            {frontdoor && (
+              <p className="hint ok">
+                identified by front-door — via {"{"}{check.variables.join(", ")}{"}"}{" "}
+                <button className="link why" onClick={showWhy}>why?</button>
+              </p>
+            )}
+            {check && check.strategy === null && (
+              <p className="hint bad">
+                not identifiable from this DAG{" "}
+                <button className="link why" onClick={showWhy}>why?</button>
               </p>
             )}
             {check?.error && <p className="hint bad">{check.error}</p>}
@@ -706,8 +805,8 @@ export default function App() {
             </button>
             {busy && (
               <p className="hint">
-                500 bootstrap resamples and the refutation tests — a few seconds
-                on the free demo instance.
+                500 bootstrap resamples and the refutation tests, computed in your
+                browser — a few seconds.
               </p>
             )}
           </section>
@@ -730,7 +829,10 @@ export default function App() {
               </div>
               <div className="arrow">→</div>
               <div className="ate adjusted">
-                <span className="label">adjusted {"{"}{result.adjustment_set.join(", ")}{"}"}</span>
+                <span className="label">
+                  {result.strategy === "frontdoor" ? "front-door via" : "adjusted"}{" "}
+                  {"{"}{result.adjustment_set.join(", ")}{"}"}
+                </span>
                 <span className="value">{result.adjusted.value.toFixed(3)}</span>
                 {result.adjusted.ci && (
                   <span className="ci">
@@ -836,7 +938,7 @@ export default function App() {
 
         <footer>
           drag from a variable to another to add a cause → effect edge · move a
-          variable by its ⋮⋮ grip · click an edge to remove it
+          variable by its ⋮⋮ grip · click an edge to remove it · dashed = unmeasured
         </footer>
       </aside>
 
@@ -861,17 +963,42 @@ export default function App() {
           <Controls showInteractive={false} />
         </ReactFlow>
         {nodes.length === 0 && (
-          <div className="empty">Load an example or upload a CSV to start drawing the DAG.</div>
+          <div className="empty">Load an example or open a CSV to start drawing the DAG.</div>
+        )}
+        {nodes.length > 0 && (
+          <div className="canvas-tools">
+            <button
+              className="chip small"
+              onClick={addUnmeasured}
+              title="a variable that matters causally but has no column in the data"
+            >
+              + unmeasured variable
+            </button>
+          </div>
         )}
       </main>
 
-      {source?.kind === "file" && profile.length > 0 && (
+      {source && (guide || source.kind === "file" || check?.explanation) && (
         guideOpen ? (
-          <aside className="guide data-check">
+          <aside className={source.kind === "file" ? "guide data-check" : "guide"}>
             <div className="guide-head">
-              <span className="eyebrow">Data check</span>
+              <span className="eyebrow">{panelTitle}</span>
               <button className="link" title="hide" onClick={() => setGuideOpen(false)}>hide</button>
             </div>
+            {check?.explanation && (
+              <details
+                className={`ident ident-${check.strategy ?? "none"}`}
+                open={identOpen}
+                onToggle={(e) => setIdentOpen(e.currentTarget.open)}
+              >
+                <summary>{IDENT_SUMMARY[check.strategy ?? "none"]}</summary>
+                <ul>
+                  {check.explanation.map((line) => <li key={line}>{line}</li>)}
+                </ul>
+              </details>
+            )}
+            {source.kind === "file" && profile.length > 0 && (
+              <>
             <h2>{source.name}</h2>
             {dataInfo && (
               <p className="hint">
@@ -924,19 +1051,10 @@ export default function App() {
                 })}
               </tbody>
             </table>
-          </aside>
-        ) : (
-          <button className="guide-tab" onClick={() => setGuideOpen(true)}>Data check</button>
-        )
-      )}
-
-      {guide && (
-        guideOpen ? (
-          <aside className="guide">
-            <div className="guide-head">
-              <span className="eyebrow">About this example</span>
-              <button className="link" title="hide" onClick={() => setGuideOpen(false)}>hide</button>
-            </div>
+              </>
+            )}
+            {guide && (
+              <>
             <h2>{guide.title}</h2>
             <p>{guide.story}</p>
             <h3>Why naive and adjusted differ</h3>
@@ -962,11 +1080,11 @@ export default function App() {
             <button className="link" onClick={() => loadExample(source.name)}>
               ↺ reset to the original DAG
             </button>
+              </>
+            )}
           </aside>
         ) : (
-          <button className="guide-tab" onClick={() => setGuideOpen(true)}>
-            About this example
-          </button>
+          <button className="guide-tab" onClick={() => setGuideOpen(true)}>{panelTitle}</button>
         )
       )}
     </div>

@@ -257,6 +257,83 @@ def adjustment_formula(
     )
 
 
+def frontdoor_formula(
+    df: pd.DataFrame,
+    treatment: str,
+    outcome: str,
+    mediators: list[str],
+) -> Estimate:
+    """Front-door formula, exact within groups of mediator values.
+
+        E[Y | do(T=t)] = sum_m P(m | t) * sum_t' E[Y | m, t'] P(t')
+
+    The first factor is how the treatment moves the mediators (nothing
+    confounds that step); the second is how the mediators move the outcome,
+    with the treatment held as a control for the hidden confounder. Mediator
+    groups that never occur under both arms cannot give E[Y | m, t'] for both
+    t' and are dropped, counted in `diagnostics['dropped_rows']`.
+    """
+    t = _check_binary(df[treatment], treatment)
+    y = df[outcome].astype(float).to_numpy()
+    cells = df.groupby(mediators, dropna=False, sort=False, observed=True).ngroup().to_numpy()
+    k = int(cells.max()) + 1
+    n1 = np.bincount(cells, weights=t, minlength=k)
+    n0 = np.bincount(cells, weights=1 - t, minlength=k)
+    usable = (n1 > 0) & (n0 > 0)
+    if not usable.any():
+        raise ValueError("no group of mediator values occurs under both treatment arms: positivity violated")
+
+    y1 = np.divide(np.bincount(cells, weights=y * t, minlength=k), n1, where=n1 > 0, out=np.zeros(k))
+    y0 = np.divide(np.bincount(cells, weights=y * (1 - t), minlength=k), n0, where=n0 > 0, out=np.zeros(k))
+    p1 = t.mean()
+    outcome_given_m = y1 * p1 + y0 * (1 - p1)  # sum_t' E[Y|m,t'] P(t')
+
+    # P(m | t), renormalized over the usable groups
+    pm1 = n1 * usable / (n1 * usable).sum()
+    pm0 = n0 * usable / (n0 * usable).sum()
+    dropped = int((~usable[cells]).sum())
+    return Estimate(
+        value=float(((pm1 - pm0) * outcome_given_m).sum()),
+        method="adjustment-formula",
+        adjustment_set=list(mediators),
+        n=len(df),
+        diagnostics={"dropped_rows": dropped, "dropped_fraction": round(dropped / len(df), 4)},
+    )
+
+
+def frontdoor_g_computation(
+    df: pd.DataFrame,
+    treatment: str,
+    outcome: str,
+    mediators: list[str],
+) -> Estimate:
+    """Front-door with models: linear outcome model on mediators and treatment.
+
+    With E[Y | m, t'] = a + b t' + (c + d t')·m, averaging over P(t') gives
+    a + b p + (c + d p)·m, so the effect is (c + d p)·(E[m | T=1] - E[m | T=0]):
+    how much the treatment shifts the mediators, times what a unit of mediator
+    is worth for the outcome. Works with continuous mediators.
+    """
+    t = _check_binary(df[treatment], treatment)
+    y = df[outcome].astype(float).to_numpy()
+    m = _design_matrix(df, mediators)
+    x = np.column_stack([np.ones(len(t)), t, m, m * t[:, None]])
+    beta, *_ = np.linalg.lstsq(x, y, rcond=None)
+    q = m.shape[1]
+    c, d = beta[2:2 + q], beta[2 + q:]
+    p1 = t.mean()
+    shift = m[t == 1].mean(axis=0) - m[t == 0].mean(axis=0)
+    resid = y - x @ beta
+    dof = max(len(t) - x.shape[1], 1)
+    return Estimate(
+        value=float((c + d * p1) @ shift),
+        method="g-computation",
+        adjustment_set=list(mediators),
+        n=len(df),
+        diagnostics={"residual_sd": float(np.sqrt((resid**2).sum() / dof))},
+    )
+
+
 def bootstrap_ci(
     estimator,
     df: pd.DataFrame,
