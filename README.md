@@ -69,6 +69,23 @@ on `{Pi, O}` +0.108 on the 64 episodes with overlap — the stratum `Pi=0, O=0`
 contains no treated episode and is dropped, not imputed.
 `tests/test_hrisim.py` pins these numbers as a regression.
 
+## Web app
+
+A visual DAG editor over the same engine: load an example or upload a CSV,
+draw the arrows, and the minimal adjustment set updates live as the graph
+changes; one click runs the full estimate with bootstrap CI and refutations.
+
+```bash
+pip install -e ".[server]"
+cd frontend && npm install && npm run build   # builds into ateflow/static
+uvicorn ateflow.server:app
+```
+
+For development, run the API and `npm run dev` side by side: Vite proxies
+`/api` to port 8000. The API alone (no built frontend) exposes
+`/api/estimate`, `/api/dag/check`, `/api/columns`, `/api/examples` — docs at
+`/docs`.
+
 ## What it does today
 
 - DAG with acyclicity checking and chain parsing (`a -> b -> c`)
