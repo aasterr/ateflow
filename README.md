@@ -146,6 +146,10 @@ at its top.
 - Pearl's backdoor criterion, search for the minimal set and the alternative sets
 - explicit refusal of mediators, colliders, and descendants of the treatment
 - estimation by g-computation (with T*Z interactions) and by stratification
+- inverse probability weighting and doubly robust AIPW, with overlap
+  diagnostics: clipped propensities and effective sample size. With discrete
+  confounders the propensity model is saturated, so a cell with no treated
+  units is flagged instead of being smoothed over
 - percentile bootstrap intervals
 - refutation tests: placebo treatment, random common cause
 

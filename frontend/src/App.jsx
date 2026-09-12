@@ -506,6 +506,8 @@ export default function App() {
               <select value={method} onChange={(e) => setMethod(e.target.value)}>
                 <option value="stratification">stratification</option>
                 <option value="g-computation">g-computation</option>
+                <option value="ipw">IPW (weighting)</option>
+                <option value="aipw">AIPW (doubly robust)</option>
               </select>
             </label>
             {check?.minimal && (
@@ -563,6 +565,22 @@ export default function App() {
                   <dt>dropped (no overlap)</dt>
                   <dd>
                     {result.adjusted.diagnostics.dropped_strata} of {result.adjusted.n} rows
+                  </dd>
+                </>
+              )}
+              {result.adjusted.diagnostics.effective_n !== undefined && (
+                <>
+                  <dt>effective sample size</dt>
+                  <dd>
+                    {Math.round(result.adjusted.diagnostics.effective_n)} of {result.adjusted.n}
+                  </dd>
+                </>
+              )}
+              {result.adjusted.diagnostics.clipped > 0 && (
+                <>
+                  <dt>weak overlap (clipped)</dt>
+                  <dd className="bad">
+                    {result.adjusted.diagnostics.clipped} of {result.adjusted.n} rows
                   </dd>
                 </>
               )}

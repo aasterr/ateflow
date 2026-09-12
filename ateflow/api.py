@@ -12,8 +12,10 @@ import pandas as pd
 
 from .estimate import (
     Estimate,
+    aipw,
     bootstrap_ci,
     g_computation,
+    ipw,
     naive,
     refute_placebo_treatment,
     refute_random_common_cause,
@@ -96,7 +98,12 @@ def estimate_ate(
             )
         chosen = sorted(adjustment_set)
 
-    estimators = {"g-computation": g_computation, "stratification": stratification}
+    estimators = {
+        "g-computation": g_computation,
+        "stratification": stratification,
+        "ipw": ipw,
+        "aipw": aipw,
+    }
     if method not in estimators:
         raise ValueError(f"unknown method {method!r}, use one of {sorted(estimators)}")
     fn = estimators[method]

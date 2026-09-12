@@ -118,6 +118,13 @@ def render_report(analysis: dict) -> str:
             f"<strong>{dropped} of {adjusted['n']} rows</strong> lie in strata where the "
             "treatment never varies (positivity violation); they were excluded, not imputed."
         )
+    clipped = adjusted["diagnostics"].get("clipped", 0)
+    if clipped:
+        interpretation.append(
+            f"<strong>{clipped} of {adjusted['n']} rows</strong> have a propensity score "
+            "below 1% or above 99% and were clipped (positivity is weak there): the "
+            "weighted estimate leans on few comparable units."
+        )
     if adjusted.get("ci"):
         lo, hi = adjusted["ci"]
         if lo < 0 < hi:

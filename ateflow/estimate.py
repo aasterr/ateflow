@@ -1,8 +1,10 @@
 """ATE estimators for a binary treatment.
 
-Two routes, both with the same signature:
+Four routes, all with the same signature:
   - `g_computation`: linear outcome model + standardization over the sample
   - `stratification`: stratified adjustment formula (discrete confounders only)
+  - `ipw`: logistic propensity model + inverse probability weighting
+  - `aipw`: doubly robust, outcome model plus propensity-weighted correction
 """
 
 from __future__ import annotations
@@ -66,9 +68,24 @@ def g_computation(
     t = _check_binary(df[treatment], treatment)
     y = df[outcome].astype(float).to_numpy()
     z = _design_matrix(df, adjustment_set)
+    y1, y0, residual_sd = _outcome_model(t, y, z, interactions)
+    return Estimate(
+        value=float((y1 - y0).mean()),
+        method="g-computation",
+        adjustment_set=list(adjustment_set),
+        n=len(df),
+        diagnostics={"residual_sd": residual_sd},
+    )
+
+
+def _outcome_model(
+    t: np.ndarray, y: np.ndarray, z: np.ndarray, interactions: bool = True
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Linear model of Y on T and Z: predictions under T=1 and T=0, residual sd."""
+    n = len(t)
 
     def build(t_vec: np.ndarray) -> np.ndarray:
-        cols = [np.ones(len(df)), t_vec]
+        cols = [np.ones(n), t_vec]
         if z.shape[1]:
             cols.append(z)
             if interactions:
@@ -77,16 +94,117 @@ def g_computation(
 
     x = build(t)
     beta, *_ = np.linalg.lstsq(x, y, rcond=None)
-    y1 = build(np.ones(len(df))) @ beta
-    y0 = build(np.zeros(len(df))) @ beta
     resid = y - x @ beta
-    dof = max(len(df) - x.shape[1], 1)
+    dof = max(n - x.shape[1], 1)
+    return (build(np.ones(n)) @ beta, build(np.zeros(n)) @ beta,
+            float(np.sqrt((resid**2).sum() / dof)))
+
+
+PROPENSITY_CLIP = 0.01
+
+
+def _propensity(t: np.ndarray, z: np.ndarray, ridge: float = 1e-4, iters: int = 50) -> np.ndarray:
+    """P(T=1 | Z) by logistic regression, fitted with Newton-Raphson.
+
+    A tiny ridge keeps the fit finite under separation (a stratum with no
+    treated units), where the unpenalized coefficients would diverge.
+    """
+    x = np.column_stack([np.ones(len(t)), z])
+    beta = np.zeros(x.shape[1])
+    penalty = ridge * np.eye(x.shape[1])
+    penalty[0, 0] = 0.0
+    for _ in range(iters):
+        p = 1 / (1 + np.exp(-np.clip(x @ beta, -30, 30)))
+        grad = x.T @ (t - p) - penalty @ beta
+        hess = (x * (p * (1 - p))[:, None]).T @ x + penalty
+        step = np.linalg.solve(hess, grad)
+        beta += step
+        if np.abs(step).max() < 1e-8:
+            break
+    return 1 / (1 + np.exp(-np.clip(x @ beta, -30, 30)))
+
+
+def _propensity_design(df: pd.DataFrame, covariates: list[str], max_levels: int = 10) -> np.ndarray:
+    """Covariates for the propensity model.
+
+    When every confounder is discrete, one dummy per observed combination
+    (a saturated model): an additive logistic model would smooth over a cell
+    with no treated units and hide the positivity violation that
+    stratification reports. Continuous confounders enter additively.
+    """
+    if covariates and all(df[c].nunique(dropna=False) <= max_levels for c in covariates):
+        cells = df[covariates].astype(str).agg("|".join, axis=1)
+        if cells.nunique() <= max(len(df) // 5, 2):
+            return pd.get_dummies(cells, drop_first=True, dtype=float).to_numpy()
+    return _design_matrix(df, covariates)
+
+
+def _overlap_diagnostics(e_raw: np.ndarray, t: np.ndarray) -> dict:
+    """What the weights look like: clipped propensities and effective sample size."""
+    w = np.where(t == 1, 1 / e_raw.clip(PROPENSITY_CLIP, 1 - PROPENSITY_CLIP),
+                 1 / (1 - e_raw.clip(PROPENSITY_CLIP, 1 - PROPENSITY_CLIP)))
+    return {
+        "propensity_min": round(float(e_raw.min()), 4),
+        "propensity_max": round(float(e_raw.max()), 4),
+        "clipped": int(((e_raw < PROPENSITY_CLIP) | (e_raw > 1 - PROPENSITY_CLIP)).sum()),
+        "effective_n": round(float(w.sum() ** 2 / (w**2).sum()), 1),
+    }
+
+
+def ipw(
+    df: pd.DataFrame,
+    treatment: str,
+    outcome: str,
+    adjustment_set: list[str],
+) -> Estimate:
+    """Inverse probability weighting: reweights each arm to look like the whole sample.
+
+    Uses normalized (Hajek) weights. Propensities are clipped to
+    [0.01, 0.99]; how many were clipped is reported, since clipping means
+    the positivity assumption is shaky and the estimate leans on few rows.
+    """
+    t = _check_binary(df[treatment], treatment)
+    y = df[outcome].astype(float).to_numpy()
+    e_raw = _propensity(t, _propensity_design(df, adjustment_set))
+    e = e_raw.clip(PROPENSITY_CLIP, 1 - PROPENSITY_CLIP)
+    w1, w0 = t / e, (1 - t) / (1 - e)
+    if w1.sum() == 0 or w0.sum() == 0:
+        raise ValueError("one treatment arm is empty")
+    value = (w1 * y).sum() / w1.sum() - (w0 * y).sum() / w0.sum()
     return Estimate(
-        value=float((y1 - y0).mean()),
-        method="g-computation",
+        value=float(value),
+        method="ipw",
         adjustment_set=list(adjustment_set),
         n=len(df),
-        diagnostics={"residual_sd": float(np.sqrt((resid**2).sum() / dof))},
+        diagnostics=_overlap_diagnostics(e_raw, t),
+    )
+
+
+def aipw(
+    df: pd.DataFrame,
+    treatment: str,
+    outcome: str,
+    adjustment_set: list[str],
+) -> Estimate:
+    """Augmented IPW (doubly robust): outcome model corrected by weighted residuals.
+
+    Consistent if either the outcome model or the propensity model is right,
+    so a misspecified linear outcome model no longer biases the estimate on
+    its own.
+    """
+    t = _check_binary(df[treatment], treatment)
+    y = df[outcome].astype(float).to_numpy()
+    z = _design_matrix(df, adjustment_set)
+    e_raw = _propensity(t, _propensity_design(df, adjustment_set))
+    e = e_raw.clip(PROPENSITY_CLIP, 1 - PROPENSITY_CLIP)
+    m1, m0, _ = _outcome_model(t, y, z)
+    psi = m1 - m0 + t * (y - m1) / e - (1 - t) * (y - m0) / (1 - e)
+    return Estimate(
+        value=float(psi.mean()),
+        method="aipw",
+        adjustment_set=list(adjustment_set),
+        n=len(df),
+        diagnostics=_overlap_diagnostics(e_raw, t),
     )
 
 
