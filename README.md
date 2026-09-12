@@ -3,7 +3,7 @@
 Causal effect estimation from a declarative DAG.
 
 [![ci](https://github.com/aasterr/ateflow/actions/workflows/ci.yml/badge.svg)](https://github.com/aasterr/ateflow/actions/workflows/ci.yml)
-[![live demo](https://img.shields.io/badge/demo-live-4459d8)](https://ateflow.onrender.com)
+[![live demo](https://img.shields.io/badge/demo-live-4459d8)](https://aasterr.github.io/ateflow/)
 [![license: MIT](https://img.shields.io/badge/license-MIT-1f7a4d)](LICENSE)
 
 **The question it answers, and only that one:** given a binary treatment and a DAG,
@@ -11,9 +11,12 @@ how much does the outcome change net of confounders?
 
 Everything that does not serve this sentence stays out.
 
-**[Try it →](https://ateflow.onrender.com)** — draw the DAG, get the estimate.
-The demo runs on a free instance, so the first load may take a minute to wake
-up and an estimate takes a few seconds.
+**[Try it →](https://aasterr.github.io/ateflow/)** — open a CSV, draw the DAG, get the estimate.
+**Everything runs in your browser**: the engine is the same Python package,
+compiled to WebAssembly with [Pyodide](https://pyodide.org), so the file you
+open is never uploaded anywhere. The first visit downloads Python, numpy and
+pandas (a few seconds, then cached); an estimate with 500 bootstrap resamples
+and the refutation tests takes 2–5 seconds.
 
 ![The DAG editor, with the naive and adjusted estimates side by side](docs/screenshot.png)
 
@@ -104,19 +107,27 @@ contains no treated episode and is dropped, not imputed.
 
 ## Web app
 
-A visual DAG editor over the same engine: load an example or upload a CSV,
+A visual DAG editor over the same engine: load an example or open a CSV,
 draw the arrows, and the minimal adjustment set updates live as the graph
 changes; one click runs the full estimate with bootstrap CI and refutations.
 
+The app is static. `ateflow/service.py` holds the request logic; in the page
+it runs inside a Web Worker on Pyodide, and saved analyses (dataset included)
+stay in the browser's IndexedDB. The same module backs the optional FastAPI
+server, so the two front doors cannot drift apart.
+
 ```bash
-pip install -e ".[server]"
+python examples/make_data.py                  # example datasets bundled into the build
 cd frontend && npm install && npm run build   # builds into ateflow/static
-uvicorn ateflow.server:app
+npm run smoke                                 # the engine under Pyodide in Node, checked against pinned numbers
 ```
+
+Serve `ateflow/static` with any static file server, or with the API:
+`pip install -e ".[server]" && uvicorn ateflow.server:app`.
 
 ### Bringing your own CSV
 
-Upload the file as it comes out of your tool. ateflow detects the delimiter
+Open the file as it comes out of your tool. ateflow detects the delimiter
 (comma, semicolon, tab, pipe), a decimal comma and Windows encodings, so an
 Excel export with Italian locale reads as-is. A data check then shows every
 column with what it looks like — two values, categories, numeric, an ID,
@@ -137,30 +148,26 @@ The same checks run from the CLI (`--treated-value`, `--outcome-positive`)
 and from Python, where `Result.data_report` holds the details. Uploads are
 limited to 20 MB.
 
-For development, run the API and `npm run dev` side by side: Vite proxies
-`/api` to port 8000. The API alone (no built frontend) exposes
-`/api/estimate`, `/api/dag/check`, `/api/columns`, `/api/examples` — docs at
-`/docs`.
-
 Analyses can be saved (dataset included, so they always reload) and exported
-as a standalone HTML report with the DAG drawn inline — ready to print to
-PDF. Storage is SQLite, stdlib only; set `ATEFLOW_DB` to move the file.
+as a standalone HTML report with the DAG drawn inline — ready to print to PDF.
+
+For development, `npm run dev` serves the app with hot reload. The HTTP API
+(`uvicorn ateflow.server:app`) exposes `/api/estimate`, `/api/dag/check`,
+`/api/columns`, `/api/examples` and SQLite-backed `/api/analyses` — docs at
+`/docs`; set `ATEFLOW_DB` to move the database file.
 
 ## Deploy
 
-The Dockerfile builds the frontend and serves everything from one container:
+The public demo is published to GitHub Pages by `.github/workflows/pages.yml`
+on every push to `master`, after the Pyodide smoke test passes.
+
+To self-host, the Dockerfile builds the same static app and serves it with the
+API from one container:
 
 ```bash
 docker build -t ateflow .
 docker run -p 8080:8080 -v ateflow_data:/data ateflow
 ```
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/aasterr/ateflow)
-
-`render.yaml` deploys the demo to Render's free tier (the instance sleeps
-when idle and its disk is ephemeral). `fly.toml` is included for Fly.io,
-where a mounted volume makes saved analyses persistent — see the comments
-at its top.
 
 ## What it does today
 

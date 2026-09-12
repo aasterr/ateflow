@@ -1,9 +1,11 @@
-"""HTTP API over the library: upload a CSV, declare a DAG, get the estimate.
+"""HTTP API over the library, for local installs: upload a CSV, declare a DAG, get the estimate.
 
 Run with:
 
     uvicorn ateflow.server:app --reload
 
+The public demo does not use this: it runs the same `service` module in the
+browser. Here the request logic is `service` too, plus SQLite persistence.
 If `ateflow/static/` exists (the built frontend), it is served at `/`.
 """
 
@@ -11,169 +13,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import store
-from .api import Result, estimate_ate
-from .data import DataError, profile, read_csv
-from .graph import DAG
-from .report import render_report
-
-EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
-
-# Each example carries a short guide for the demo: the question, why the naive
-# and adjusted answers differ, and DAG edits worth trying. The numbers quoted
-# are stratification estimates on the bundled data (the UI default method);
-# tests/test_server.py applies every `edit` and checks the result against `expect`,
-# so the texts cannot drift away from what the demo actually shows.
-EXAMPLES = {
-    "corridor": {
-        "data": "corridor.csv",
-        "dag": "corridor.dag",
-        "treatment": "led",
-        "outcome": "speed",
-        "description": "Synthetic corridor scenario with a Simpson's paradox (true ATE +0.15).",
-        "guide": {
-            "title": "Does a robot's LED make people walk faster?",
-            "story": "A robot in a corridor can switch on an LED signal. The data are "
-                     "synthetic, so the true answer is known: +0.15 in walking speed.",
-            "why": "The robot turns the LED on mostly when the corridor is crowded, and "
-                   "people walk slowly in a crowd anyway. Compared as they are, LED "
-                   "episodes look slower (−0.13). Adjusting for crowding compares "
-                   "like with like and recovers +0.15.",
-            "tries": [
-                {
-                    "text": "Remove crowding → led. Nothing seems to confound the LED "
-                            "any more, the adjustment set is empty and the estimate "
-                            "falls back to the biased −0.13.",
-                    "edit": {"op": "remove", "edge": ["crowding", "led"]}, "expect": -0.130,
-                },
-                {
-                    "text": "Flip crowding → led. Crowding becomes a consequence of the "
-                            "LED, adjusting for it is no longer allowed, and ateflow "
-                            "reports −0.13 again: the DAG is an assumption, and the "
-                            "answer is only as good as it.",
-                    "edit": {"op": "flip", "edge": ["crowding", "led"]}, "expect": -0.130,
-                },
-            ],
-        },
-    },
-    "onboarding": {
-        "data": "onboarding.csv",
-        "dag": "onboarding.dag",
-        "treatment": "onboarding_email",
-        "outcome": "retained_30d",
-        "description": "Synthetic product analytics: does a targeted onboarding email "
-                       "raise 30-day retention? (true ATE +0.09)",
-        "guide": {
-            "title": "Did the onboarding email raise retention?",
-            "story": "Synthetic signups of a subscription product. Some received an "
-                     "onboarding email; the outcome is whether they are still active "
-                     "after 30 days. True effect: +9 retention points.",
-            "why": "The growth team emailed mostly free-plan users who arrived from paid "
-                   "ads, the ones most likely to churn. The emailed group retains worse "
-                   "(−6.9 points) because of who they are, not because of the email. "
-                   "Adjusting for plan and channel gives about +9. First-week activity is "
-                   "a mediator, so it stays out of the adjustment.",
-            "tries": [
-                {
-                    "text": "Remove plan → onboarding_email. Adjusting for channel alone "
-                            "leaves most of the bias in: −0.02.",
-                    "edit": {"op": "remove", "edge": ["plan", "onboarding_email"]}, "expect": -0.021,
-                },
-                {
-                    "text": "Remove channel → onboarding_email. Adjusting for plan alone "
-                            "gives +0.02, still far from +0.09.",
-                    "edit": {"op": "remove", "edge": ["channel", "onboarding_email"]}, "expect": 0.023,
-                },
-                {
-                    "text": "Flip onboarding_email → active_week1. Activity now looks like "
-                            "a cause of the email, enters the adjustment set, and the "
-                            "estimate drops to +0.035: the part of the effect that works "
-                            "by bringing users back is thrown away.",
-                    "edit": {"op": "flip", "edge": ["onboarding_email", "active_week1"]}, "expect": 0.035,
-                },
-            ],
-        },
-    },
-    "hrisim": {
-        "data": "episodes_100_v1.csv",
-        "dag": "hrisim.dag",
-        "treatment": "A",
-        "outcome": "T",
-        "description": "100 real HRI episodes from the PeopleFlow dataset (thesis numbers).",
-        "guide": {
-            "title": "Does the robot's signal help it succeed? (real data)",
-            "story": "100 real episodes of a robot crossing a corridor with people. A: the "
-                     "robot emits an LED signal. T: the task succeeds instead of timing "
-                     "out. O: static obstacles. The numbers match the reference thesis.",
-            "why": "Obstacles change both whether the robot signals and how likely the task "
-                   "is to succeed. Compared as they are, signalling episodes succeed less "
-                   "(−0.207). Adjusting for O reverses the sign: +0.061.",
-            "tries": [
-                {
-                    "text": "Add Pi → Pe. Pi becomes a confounder too, the set grows to "
-                            "{O, Pi} and the estimate rises to +0.108, but 36 of the 100 "
-                            "episodes are dropped: with Pi=0 and O=0 the robot never "
-                            "signalled, so there is nothing to compare.",
-                    "edit": {"op": "add", "edge": ["Pi", "Pe"]}, "expect": 0.108,
-                },
-                {
-                    "text": "Remove O → A. With no confounder declared, the answer is the "
-                            "naive −0.207.",
-                    "edit": {"op": "remove", "edge": ["O", "A"]}, "expect": -0.207,
-                },
-            ],
-        },
-    },
-}
+from . import service, store
+from .data import profile
+from .service import EXAMPLES, MAX_UPLOAD_MB, ServiceError  # noqa: F401  (re-exported)
 
 app = FastAPI(title="ateflow", description=__doc__)
 
 
-def _result_payload(result: Result) -> dict:
-    def estimate(e) -> dict:
-        return {
-            "value": e.value,
-            "method": e.method,
-            "adjustment_set": e.adjustment_set,
-            "ci": list(e.ci) if e.ci else None,
-            "n": e.n,
-            "diagnostics": e.diagnostics,
-        }
-
-    return {
-        "naive": estimate(result.naive),
-        "adjusted": estimate(result.adjusted),
-        "adjustment_set": result.adjustment_set,
-        "alternatives": [sorted(s) for s in result.alternatives],
-        "refutations": result.refutations,
-        "confounding_bias": result.confounding_bias,
-        "sign_flip": result.sign_flip,
-        "data_report": result.data_report,
-        "report": result.report(),
-    }
-
-
-MAX_UPLOAD_MB = 20
-
-
-def _read_csv(raw: bytes, name: str) -> pd.DataFrame:
-    return _read_csv_with_info(raw, name)[0]
-
-
-def _read_csv_with_info(raw: bytes, name: str) -> tuple[pd.DataFrame, dict]:
-    if len(raw) > MAX_UPLOAD_MB * 1024 * 1024:
-        raise HTTPException(
-            413, f"{name!r} is {len(raw) / 2**20:.0f} MB, the limit is {MAX_UPLOAD_MB} MB")
+def _call(fn, *args, **kwargs):
     try:
-        return read_csv(raw)
-    except DataError as exc:
-        raise HTTPException(422, f"{name}: {exc}") from exc
+        return fn(*args, **kwargs)
+    except ServiceError as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
 
 
 class DagCheckRequest(BaseModel):
@@ -186,67 +42,27 @@ class DagCheckRequest(BaseModel):
 @app.post("/api/dag/check")
 def check_dag(req: DagCheckRequest) -> dict:
     """Parses the DAG and, when treatment and outcome are given, identifies it."""
-    try:
-        graph = DAG.parse(req.dag)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-    out: dict = {
-        "nodes": sorted(graph.nodes),
-        "edges": graph.edges,
-        "missing_columns": sorted(graph.nodes - set(req.columns)) if req.columns else [],
-    }
-    if req.treatment and req.outcome:
-        for name in (req.treatment, req.outcome):
-            if name not in graph.nodes:
-                raise HTTPException(422, f"{name!r} does not appear in the DAG")
-        try:
-            minimal = sorted(graph.minimal_backdoor_set(req.treatment, req.outcome))
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        out["minimal_adjustment_set"] = minimal
-        out["alternatives"] = [
-            sorted(s)
-            for s in graph.backdoor_sets(req.treatment, req.outcome, max_size=len(minimal) + 1)
-            if sorted(s) != minimal
-        ]
-    return out
+    return _call(service.check_dag, req.dag, req.treatment, req.outcome, req.columns)
 
 
 async def _resolve_data(
     file: UploadFile | None, example: str | None, saved: int | None = None
-) -> tuple[pd.DataFrame, bytes, str]:
-    """The dataset behind a request: uploaded CSV, bundled example, or saved analysis."""
+) -> tuple[bytes, str, str]:
+    """The dataset behind a request: uploaded CSV, bundled example, or saved analysis.
+
+    Returns the bytes, a name for messages, and the source label stored with analyses.
+    """
     if file is not None:
-        raw = await file.read()
-        return _read_csv(raw, file.filename or "upload"), raw, file.filename or "upload"
+        name = file.filename or "upload"
+        return await file.read(), name, name
     if example is not None:
-        spec = EXAMPLES.get(example)
-        if spec is None:
-            raise HTTPException(404, f"unknown example {example!r}")
-        raw = (EXAMPLES_DIR / spec["data"]).read_bytes()
-        return _read_csv(raw, example), raw, f"example: {example}"
+        return _call(service.example_bytes, example), example, f"example: {example}"
     if saved is not None:
         record = store.get_analysis(saved)
         if record is None:
             raise HTTPException(404, f"no analysis with id {saved}")
-        raw = record["csv"]
-        return _read_csv(raw, record["name"]), raw, record["source"]
+        return record["csv"], record["name"], record["source"]
     raise HTTPException(422, "provide a CSV file, an example name, or a saved analysis id")
-
-
-def _run(data: pd.DataFrame, dag: str, treatment: str, outcome: str,
-         method: str, boot: int, refute: bool, seed: int,
-         treated_value: str | None = None, outcome_positive: str | None = None) -> dict:
-    try:
-        result = estimate_ate(
-            data, dag, treatment=treatment, outcome=outcome,
-            method=method, n_boot=boot, refute=refute, seed=seed,
-            treated_value=treated_value or None, outcome_positive=outcome_positive or None,
-        )
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    return _result_payload(result)
 
 
 @app.post("/api/estimate")
@@ -265,9 +81,9 @@ async def estimate(
     outcome_positive: str | None = Form(None),
 ) -> dict:
     """Runs the full estimate on an uploaded CSV, a bundled example, or saved data."""
-    data, _, _ = await _resolve_data(file, example, saved)
-    return _run(data, dag, treatment, outcome, method, boot, refute, seed,
-                treated_value, outcome_positive)
+    raw, name, _ = await _resolve_data(file, example, saved)
+    return _call(service.estimate, raw, dag, treatment, outcome, method, boot,
+                 refute, seed, treated_value, outcome_positive, name=name)
 
 
 @app.post("/api/analyses")
@@ -286,9 +102,9 @@ async def save_analysis(
     outcome_positive: str | None = Form(None),
 ) -> dict:
     """Runs the estimate and persists everything: dataset, DAG, question, result."""
-    data, raw, source = await _resolve_data(file, example, saved)
-    payload = _run(data, dag, treatment, outcome, method, boot, True, seed,
-                   treated_value, outcome_positive)
+    raw, data_name, source = await _resolve_data(file, example, saved)
+    payload = _call(service.estimate, raw, dag, treatment, outcome, method,
+                    boot, True, seed, treated_value, outcome_positive, name=data_name)
     analysis_id = store.save_analysis(
         name=name.strip() or "untitled",
         source=source,
@@ -312,8 +128,7 @@ def analysis(analysis_id: int) -> dict:
     saved = store.get_analysis(analysis_id)
     if saved is None:
         raise HTTPException(404, f"no analysis with id {analysis_id}")
-    data = _read_csv(saved["csv"], saved["name"])
-    saved.pop("csv")
+    data, _ = _call(service.load_csv, saved.pop("csv"), saved["name"])
     saved["columns"] = list(data.columns)
     saved["profile"] = profile(data)
     return saved
@@ -332,42 +147,22 @@ def report(analysis_id: int) -> HTMLResponse:
     saved = store.get_analysis(analysis_id)
     if saved is None:
         raise HTTPException(404, f"no analysis with id {analysis_id}")
-    return HTMLResponse(render_report(saved))
+    return HTMLResponse(service.report_html(saved))
 
 
 @app.get("/api/examples")
 def list_examples() -> dict:
     """The bundled example datasets, with their DAG and default question."""
-    out = {}
-    for name, spec in EXAMPLES.items():
-        df = _read_csv((EXAMPLES_DIR / spec["data"]).read_bytes(), name)
-        out[name] = {
-            "description": spec["description"],
-            "columns": list(df.columns),
-            "profile": profile(df),
-            "dag": (EXAMPLES_DIR / spec["dag"]).read_text(encoding="utf-8"),
-            "treatment": spec["treatment"],
-            "outcome": spec["outcome"],
-            "guide": spec.get("guide"),
-        }
-    return out
+    return _call(service.list_examples)
 
 
 @app.post("/api/columns")
 async def columns(file: UploadFile = File(...)) -> dict:
-    """Reads an uploaded CSV without keeping it: columns, how each looks, what was detected.
-
-    The frontend shows this as a data check before any question is asked.
-    """
-    data, info = _read_csv_with_info(await file.read(), file.filename or "upload")
-    return {"columns": list(data.columns), "rows": len(data),
-            "profile": profile(data), "info": info}
+    """Reads an uploaded CSV without keeping it: columns, how each looks, what was detected."""
+    return _call(service.inspect_csv, await file.read(), file.filename or "upload")
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 if STATIC_DIR.is_dir():  # built frontend, absent in bare checkouts
-    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
-
-    @app.get("/", include_in_schema=False)
-    def index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html")
+    # after the API routes, so /api/* is matched first
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

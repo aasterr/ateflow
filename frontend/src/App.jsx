@@ -16,6 +16,8 @@ import {
   useReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { engine, onProgress } from "./engine.js";
+import { store } from "./store.js";
 
 /* ---------- DAG helpers ---------- */
 
@@ -279,7 +281,10 @@ const isZeroOne = (values) => values.map(token).sort().join() === "0,1";
 
 export default function App() {
   const [examples, setExamples] = useState({});
-  const [source, setSource] = useState(null); // {kind:'example', name} | {kind:'file', file, rows}
+  // {kind:'example', name} | {kind:'file', name, bytes, rows} | {kind:'saved', id, name, bytes|example}
+  const [source, setSource] = useState(null);
+  const [engineStage, setEngineStage] = useState("starting");
+  const [engineError, setEngineError] = useState("");
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
   const [graphKey, setGraphKey] = useState(0);
@@ -302,13 +307,25 @@ export default function App() {
   const fileRef = useRef(null);
 
   const refreshSaved = useCallback(() => {
-    fetch("/api/analyses").then((r) => r.json()).then(setSavedList).catch(() => {});
+    store.list().then(setSavedList).catch(() => {});
+  }, []);
+
+  const bootEngine = useCallback(() => {
+    setEngineError("");
+    engine
+      .init()
+      .then(() => engine.examples())
+      .then(setExamples)
+      .catch((err) => setEngineError(err.message));
   }, []);
 
   useEffect(() => {
-    fetch("/api/examples").then((r) => r.json()).then(setExamples).catch(() => {});
+    const off = onProgress(setEngineStage);
+    bootEngine();
     refreshSaved();
-  }, [refreshSaved]);
+    return off;
+  }, [bootEngine, refreshSaved]);
+  const engineReady = engineStage === "ready" && !engineError;
 
   const columnNames = useMemo(() => nodes.map((n) => n.id), [nodes]);
   const dagText = useMemo(() => edgesToDagText(nodes, edges), [nodes, edges]);
@@ -405,48 +422,43 @@ export default function App() {
 
   const loadFile = async (file) => {
     if (!file) return;
-    const form = new FormData();
-    form.append("file", file);
-    const res = await fetch("/api/columns", { method: "POST", body: form });
-    const body = await res.json();
-    if (!res.ok) {
-      setError(body.detail ?? "upload failed");
-      return;
-    }
-    buildGraph(usableColumns(body.profile), []);
-    setProfile(body.profile);
-    setDataInfo(body.info);
-    setTreatment("");
-    setOutcome("");
-    setTreatedValue("");
-    setOutcomePositive("");
-    setSource({ kind: "file", file, rows: body.rows });
-    setResult(null);
     setError("");
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const body = await engine.inspect(bytes, file.name);
+      buildGraph(usableColumns(body.profile), []);
+      setProfile(body.profile);
+      setDataInfo(body.info);
+      setTreatment("");
+      setOutcome("");
+      setTreatedValue("");
+      setOutcomePositive("");
+      setSource({ kind: "file", name: file.name, bytes, rows: body.rows });
+      setResult(null);
+      setGuideOpen(true);
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   /* live identification check, debounced. String deps only: updating node
-     roles rebuilds the array identities and must not retrigger the fetch. */
+     roles rebuilds the array identities and must not retrigger the check. */
   const columnKey = useMemo(() => [...columnNames].sort().join("|"), [columnNames]);
   useEffect(() => {
     setCheck(null);
-    if (!treatment || !outcome || treatment === outcome) return;
-    const timer = setTimeout(async () => {
-      const res = await fetch("/api/dag/check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dag: dagText,
-          treatment,
-          outcome,
-          columns: columnKey ? columnKey.split("|") : [],
-        }),
-      });
-      const body = await res.json();
-      setCheck(res.ok ? { minimal: body.minimal_adjustment_set } : { error: body.detail });
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [dagText, treatment, outcome, columnKey]);
+    if (!engineReady || !treatment || !outcome || treatment === outcome) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      engine
+        .check({ dag: dagText, treatment, outcome, columns: columnKey ? columnKey.split("|") : [] })
+        .then((body) => !cancelled && setCheck({ minimal: body.minimal_adjustment_set }))
+        .catch((err) => !cancelled && setCheck({ error: err.message }));
+    }, 150);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [engineReady, dagText, treatment, outcome, columnKey]);
 
   /* Drawing b -> a over an existing a -> b flips the arrow instead of
      creating a two-node cycle; drawing an existing edge again is a no-op. */
@@ -462,81 +474,104 @@ export default function App() {
     []
   );
 
-  const questionForm = () => {
-    const form = new FormData();
-    form.append("dag", dagText);
-    form.append("treatment", treatment);
-    form.append("outcome", outcome);
-    form.append("method", method);
-    form.append("boot", "500");
-    if (treatedValue) form.append("treated_value", treatedValue);
-    if (outcomePositive) form.append("outcome_positive", outcomePositive);
-    if (source.kind === "file") form.append("file", source.file);
-    else if (source.kind === "saved") form.append("saved", source.id);
-    else form.append("example", source.name);
-    return form;
-  };
+  const question = () => ({
+    dag: dagText,
+    treatment,
+    outcome,
+    method,
+    boot: 500,
+    treated_value: treatedValue || null,
+    outcome_positive: outcomePositive || null,
+  });
+
+  /* The dataset of the current source: bytes for files and saved uploads, a name for examples. */
+  const dataOf = (src) =>
+    src.bytes ? { payload: { name: src.name }, bytes: src.bytes } : { payload: { example: src.example ?? src.name } };
 
   const run = async () => {
     setBusy(true);
     setError("");
     setResult(null);
     try {
-      const res = await fetch("/api/estimate", { method: "POST", body: questionForm() });
-      const body = await res.json();
-      if (!res.ok) setError(body.detail ?? "estimation failed");
-      else {
-        setResult(body);
-        setResultKey(currentKey);
-      }
-    } catch (e) {
-      setError(String(e));
+      const { payload, bytes } = dataOf(source);
+      const body = await engine.estimate({ ...question(), ...payload }, bytes);
+      setResult(body);
+      setResultKey(currentKey);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setBusy(false);
     }
   };
 
+  /* Saves the shown result with its question and data; nothing is re-estimated. */
   const saveAnalysis = async () => {
     setSaving(true);
     try {
-      const form = questionForm();
-      form.append("name", saveName || `${treatment} on ${outcome}`);
-      const res = await fetch("/api/analyses", { method: "POST", body: form });
-      if (!res.ok) setError((await res.json()).detail ?? "save failed");
-      else {
-        setSaveName("");
-        refreshSaved();
-      }
+      await store.save({
+        name: saveName || `${treatment} on ${outcome}`,
+        source: source.kind === "file" ? source.name : `example: ${source.example ?? source.name}`,
+        example: source.bytes ? null : source.example ?? source.name,
+        csv: source.bytes ?? null,
+        dag: dagText,
+        treatment,
+        outcome,
+        method,
+        result,
+      });
+      setSaveName("");
+      refreshSaved();
+    } catch (err) {
+      setError(`could not save: ${err.message}`);
     } finally {
       setSaving(false);
     }
   };
 
   const loadSaved = async (id) => {
-    const res = await fetch(`/api/analyses/${id}`);
-    if (!res.ok) return;
-    const a = await res.json();
-    buildGraph(usableColumns(a.profile), parseDagText(a.dag));
-    setProfile(a.profile);
-    setDataInfo(null);
-    setTreatment(a.treatment);
-    setOutcome(a.outcome);
-    setMethod(a.method);
-    // the coding chosen when it was saved travels in the stored result
-    const rep = a.result.data_report;
-    const tv = rep && !isZeroOne(Object.values(rep.treatment_coding)) ? rep.treatment_coding["1"] : "";
-    const op = rep?.outcome_coding && !isZeroOne(Object.values(rep.outcome_coding))
-      ? rep.outcome_coding["1"] : "";
-    setTreatedValue(tv);
-    setOutcomePositive(op);
-    setSource({ kind: "saved", id: a.id, name: a.name });
-    setResult(a.result);
-    setResultKey(questionKey(parseDagText(a.dag), a.treatment, a.outcome, a.method, tv, op));
-    setError("");
+    try {
+      const a = await store.get(id);
+      if (!a) return;
+      const data = a.csv ? await engine.inspect(a.csv, a.name) : examples[a.example];
+      buildGraph(usableColumns(data.profile), parseDagText(a.dag));
+      setProfile(data.profile);
+      setDataInfo(null);
+      setTreatment(a.treatment);
+      setOutcome(a.outcome);
+      setMethod(a.method);
+      // the coding chosen when it was saved travels in the stored result
+      const rep = a.result.data_report;
+      const tv = rep && !isZeroOne(Object.values(rep.treatment_coding)) ? rep.treatment_coding["1"] : "";
+      const op = rep?.outcome_coding && !isZeroOne(Object.values(rep.outcome_coding))
+        ? rep.outcome_coding["1"] : "";
+      setTreatedValue(tv);
+      setOutcomePositive(op);
+      setSource({ kind: "saved", id: a.id, name: a.name, bytes: a.csv, example: a.example });
+      setResult(a.result);
+      setResultKey(questionKey(parseDagText(a.dag), a.treatment, a.outcome, a.method, tv, op));
+      setError("");
+    } catch (err) {
+      setError(`could not load: ${err.message}`);
+    }
+  };
+
+  /* Opens the standalone report in a new tab; it is rendered here, from the stored result. */
+  const openReport = async (id) => {
+    const tab = window.open("", "_blank"); // opened synchronously so popup blockers allow it
+    try {
+      const { csv, ...a } = await store.get(id);
+      const html = await engine.report(a);
+      const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+      if (tab) tab.location.href = url;
+      else window.location.href = url;
+    } catch (err) {
+      tab?.close();
+      setError(`could not render the report: ${err.message}`);
+    }
   };
 
   const deleteSaved = async (id) => {
-    await fetch(`/api/analyses/${id}`, { method: "DELETE" });
+    await store.remove(id);
     if (source?.kind === "saved" && source.id === id) setSource(null);
     refreshSaved();
   };
@@ -564,6 +599,22 @@ export default function App() {
           <p>Causal effect estimation from a declarative DAG.</p>
         </header>
 
+        <p className="privacy">
+          Runs entirely in your browser: files you load are never uploaded anywhere.
+        </p>
+        {!engineReady && !engineError && (
+          <p className="hint engine-status">
+            <span className="spinner" /> Starting the engine — {engineStage}… (first visit
+            takes a few seconds, then it is cached)
+          </p>
+        )}
+        {engineError && (
+          <p className="hint bad">
+            The engine could not start: {engineError}.{" "}
+            <button className="link" onClick={bootEngine}>retry</button>
+          </p>
+        )}
+
         <section>
           <h2>1 · Data</h2>
           <div className="row">
@@ -577,20 +628,23 @@ export default function App() {
                 {name}
               </button>
             ))}
-            <button className="chip" onClick={() => fileRef.current?.click()}>
-              upload CSV…
+            <button className="chip" disabled={!engineReady} onClick={() => fileRef.current?.click()}>
+              open CSV…
             </button>
             <input
               ref={fileRef}
               type="file"
-              accept=".csv"
+              accept=".csv,.tsv,.txt,text/csv"
               hidden
-              onChange={(e) => loadFile(e.target.files?.[0])}
+              onChange={(e) => {
+                loadFile(e.target.files?.[0]);
+                e.target.value = ""; // choosing the same file again must reload it
+              }}
             />
           </div>
           {source?.kind === "file" && (
             <p className="hint">
-              {source.file.name} — {source.rows} rows · checked in the panel on the right
+              {source.name} — {source.rows} rows · checked in the panel on the right
             </p>
           )}
         </section>
@@ -768,9 +822,9 @@ export default function App() {
                     {a.name}
                   </button>
                   <span className="val">{a.adjusted >= 0 ? "+" : ""}{a.adjusted.toFixed(3)}</span>
-                  <a href={`/api/analyses/${a.id}/report`} target="_blank" rel="noreferrer">
+                  <button className="link report-link" onClick={() => openReport(a.id)}>
                     report
-                  </a>
+                  </button>
                   <button className="link danger" onClick={() => deleteSaved(a.id)}>
                     ×
                   </button>
@@ -818,7 +872,7 @@ export default function App() {
               <span className="eyebrow">Data check</span>
               <button className="link" title="hide" onClick={() => setGuideOpen(false)}>hide</button>
             </div>
-            <h2>{source.file.name}</h2>
+            <h2>{source.name}</h2>
             {dataInfo && (
               <p className="hint">
                 {dataInfo.rows} rows · {dataInfo.delimiter}-separated · decimal {dataInfo.decimal}

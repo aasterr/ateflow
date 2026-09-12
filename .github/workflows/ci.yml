@@ -20,10 +20,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # the browser build bundles the example datasets
+      - run: pip install numpy pandas && python examples/make_data.py
       - uses: actions/setup-node@v4
         with:
           node-version: 24
       - run: npm ci --no-fund --no-audit
+        working-directory: frontend
+      - name: engine smoke test (Pyodide)
+        run: npm run smoke
         working-directory: frontend
       - run: npm run build
         working-directory: frontend

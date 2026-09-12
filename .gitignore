@@ -10,3 +10,4 @@ node_modules/
 ateflow/static/
 .claude/
 *.db
+frontend/public/py/

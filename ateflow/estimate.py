@@ -124,19 +124,26 @@ def _propensity(t: np.ndarray, z: np.ndarray, ridge: float = 1e-4, iters: int = 
     return 1 / (1 + np.exp(-np.clip(x @ beta, -30, 30)))
 
 
-def _propensity_design(df: pd.DataFrame, covariates: list[str], max_levels: int = 10) -> np.ndarray:
-    """Covariates for the propensity model.
+def _propensity_scores(
+    df: pd.DataFrame, t: np.ndarray, covariates: list[str], max_levels: int = 10
+) -> np.ndarray:
+    """P(T=1 | Z) for every row.
 
-    When every confounder is discrete, one dummy per observed combination
-    (a saturated model): an additive logistic model would smooth over a cell
-    with no treated units and hide the positivity violation that
-    stratification reports. Continuous confounders enter additively.
+    When every confounder is discrete the model is saturated: one probability
+    per observed combination, which is just the treated share of that cell
+    (the exact maximum-likelihood fit, computed in closed form). An additive
+    logistic model would smooth over a cell with no treated units and hide the
+    positivity violation that stratification reports. Continuous confounders
+    go through the logistic regression.
     """
     if covariates and all(df[c].nunique(dropna=False) <= max_levels for c in covariates):
-        cells = df[covariates].astype(str).agg("|".join, axis=1)
-        if cells.nunique() <= max(len(df) // 5, 2):
-            return pd.get_dummies(cells, drop_first=True, dtype=float).to_numpy()
-    return _design_matrix(df, covariates)
+        cells = df.groupby(covariates, dropna=False, sort=False, observed=True).ngroup().to_numpy()
+        n_cells = int(cells.max()) + 1
+        if n_cells <= max(len(df) // 5, 2):
+            treated = np.bincount(cells, weights=t, minlength=n_cells)
+            sizes = np.bincount(cells, minlength=n_cells)
+            return (treated / sizes)[cells]
+    return _propensity(t, _design_matrix(df, covariates))
 
 
 def _overlap_diagnostics(e_raw: np.ndarray, t: np.ndarray) -> dict:
@@ -165,7 +172,7 @@ def ipw(
     """
     t = _check_binary(df[treatment], treatment)
     y = df[outcome].astype(float).to_numpy()
-    e_raw = _propensity(t, _propensity_design(df, adjustment_set))
+    e_raw = _propensity_scores(df, t, adjustment_set)
     e = e_raw.clip(PROPENSITY_CLIP, 1 - PROPENSITY_CLIP)
     w1, w0 = t / e, (1 - t) / (1 - e)
     if w1.sum() == 0 or w0.sum() == 0:
@@ -195,7 +202,7 @@ def aipw(
     t = _check_binary(df[treatment], treatment)
     y = df[outcome].astype(float).to_numpy()
     z = _design_matrix(df, adjustment_set)
-    e_raw = _propensity(t, _propensity_design(df, adjustment_set))
+    e_raw = _propensity_scores(df, t, adjustment_set)
     e = e_raw.clip(PROPENSITY_CLIP, 1 - PROPENSITY_CLIP)
     m1, m0, _ = _outcome_model(t, y, z)
     psi = m1 - m0 + t * (y - m1) / e - (1 - t) * (y - m0) / (1 - e)

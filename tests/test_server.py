@@ -1,4 +1,4 @@
-"""API tests: the endpoints must mirror the library exactly."""
+﻿"""API tests: the endpoints must mirror the library exactly."""
 
 import sys
 from pathlib import Path
@@ -47,7 +47,7 @@ def _apply_edit(dag_text: str, edit: dict) -> str:
 
 
 def test_guide_edits_produce_the_quoted_numbers():
-    from ateflow.server import EXAMPLES
+    from ateflow.service import EXAMPLES
 
     for name, spec in EXAMPLES.items():
         dag = (ROOT / "examples" / spec["dag"]).read_text(encoding="utf-8")
@@ -153,7 +153,7 @@ def test_messy_upload_round_trip(tmp_path, monkeypatch):
 def test_oversized_upload_is_refused(monkeypatch):
     import ateflow.server as server
 
-    monkeypatch.setattr(server, "MAX_UPLOAD_MB", 0.001)
+    monkeypatch.setattr(server.service, "MAX_UPLOAD_MB", 0.001)
     res = client.post("/api/columns", files={"file": ("big.csv", b"a,b\n" + b"1,2\n" * 1000, "text/csv")})
     assert res.status_code == 413
 

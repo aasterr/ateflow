@@ -4,9 +4,13 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "sync-python": "node scripts/sync-python.mjs",
+    "predev": "node scripts/sync-python.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/sync-python.mjs",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "smoke": "node scripts/sync-python.mjs && node scripts/engine-smoke.mjs"
   },
   "dependencies": {
     "@xyflow/react": "^12.8.0",
@@ -15,6 +19,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.0",
+    "pyodide": "^314.0.6",
     "vite": "^7.1.0"
   }
 }
