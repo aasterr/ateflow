@@ -1,4 +1,4 @@
-"""Il test di regressione del progetto: recupero dell'ATE noto."""
+"""The project's regression test: recovery of the known ATE."""
 
 import sys
 from pathlib import Path
@@ -43,7 +43,7 @@ def test_adjusting_for_descendant_is_refused(data):
 
 
 def test_missing_column_is_reported(data):
-    with pytest.raises(ValueError, match="assenti"):
+    with pytest.raises(ValueError, match="missing"):
         estimate_ate(data.drop(columns=["crowding"]), DAG_TEXT, "led", "speed",
                      n_boot=0, refute=False)
 

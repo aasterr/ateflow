@@ -1,4 +1,4 @@
-"""Test del criterio di backdoor su strutture canoniche."""
+"""Backdoor criterion tests on canonical structures."""
 
 import pytest
 
@@ -11,14 +11,14 @@ def test_confounder_is_selected():
 
 
 def test_collider_must_not_be_adjusted():
-    # t -> c <- y : condizionare su c apre un cammino spurio
+    # t -> c <- y : conditioning on c opens a spurious path
     dag = DAG.parse("t -> c\ny -> c\nt -> y")
     assert dag.minimal_backdoor_set("t", "y") == set()
     assert not dag.satisfies_backdoor("t", "y", ["c"])
 
 
 def test_mediator_is_excluded():
-    # t -> m -> y : m è un discendente del trattamento
+    # t -> m -> y : m is a descendant of the treatment
     dag = DAG.parse("t -> m -> y")
     assert not dag.satisfies_backdoor("t", "y", ["m"])
 

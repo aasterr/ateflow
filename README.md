@@ -1,15 +1,16 @@
 # ateflow
 
-Stima di effetti causali da un DAG dichiarativo.
+Causal effect estimation from a declarative DAG.
 
-**La domanda a cui risponde, e solo quella:** dato un trattamento binario e un DAG,
-quanto cambia l'esito al netto dei confonditori?
+**The question it answers, and only that one:** given a binary treatment and a DAG,
+how much does the outcome change net of confounders?
 
-Tutto ciò che non serve a questa frase resta fuori, almeno per i primi tre mesi.
+Everything that does not serve this sentence stays out, at least for the first
+three months.
 
-## Uso
+## Usage
 
-Il DAG è un file di testo, una relazione per riga:
+The DAG is a text file, one relation per line:
 
 ```
 crowding -> led
@@ -18,7 +19,7 @@ led -> speed
 led -> waiting_time
 ```
 
-Dalla riga di comando:
+From the command line:
 
 ```bash
 python -m ateflow --data examples/corridor.csv --dag examples/corridor.dag \
@@ -26,19 +27,20 @@ python -m ateflow --data examples/corridor.csv --dag examples/corridor.dag \
 ```
 
 ```
-naive            ATE = -0.130   aggiusto per: nessuno
-g-computation    ATE = +0.150  IC95% [+0.143, +0.156]   aggiusto per: crowding
+naive            ATE = -0.130   adjusting for: none
+g-computation    ATE = +0.150  95% CI [+0.143, +0.157]   adjusting for: crowding
 
-bias da confondimento : -0.280
-inversione di segno   : SI
+confounding bias : -0.280
+sign flip        : YES
 refutation placebo_treatment      ok        mean=-0.0000, sd=+0.0037
-refutation random_common_cause    ok        max_drift=+0.0001
+refutation random_common_cause    ok        shift=-0.0000, max_drift=+0.0002
 ```
 
-L'ATE vero del dataset sintetico è +0.15. La stima non aggiustata ha il segno
-sbagliato: `crowding` accende il LED più spesso e insieme abbassa la velocità.
+The true ATE of the synthetic dataset is +0.15. The unadjusted estimate has the
+wrong sign: `crowding` turns the LED on more often and lowers speed at the same
+time.
 
-Da Python:
+From Python:
 
 ```python
 from ateflow import DAG, estimate_ate
@@ -48,40 +50,42 @@ res = estimate_ate(df, DAG.from_file("examples/corridor.dag"),
 print(res.report(), res.sign_flip, res.confounding_bias)
 ```
 
-## Validazione su dati reali
+## Validation on real data
 
-`examples/episodes_100_v1.csv` sono i 100 episodi HRI del dataset
-[PeopleFlow](https://github.com/aasterr/PeopleFlow/tree/main/analysis): un robot
-che attraversa un corridoio e decide se emettere un segnale LED (`A`), con
-esito successo/timeout (`T`) e ostacoli statici come confonditore (`O`).
+`examples/episodes_100_v1.csv` holds the 100 HRI episodes of the
+[PeopleFlow](https://github.com/aasterr/PeopleFlow/tree/main/analysis) dataset:
+a robot traversing a corridor and deciding whether to emit an LED signal (`A`),
+with success/timeout as the outcome (`T`) and static obstacles as the
+confounder (`O`).
 
 ```bash
 python -m ateflow --data examples/episodes_100_v1.csv --dag examples/hrisim.dag \
     --treatment A --outcome T --method stratification
 ```
 
-ateflow riproduce al terzo decimale le stime della tesi di riferimento:
-naive −0.207 (segno invertito dal confondimento), backdoor su `{O}` +0.061,
-backdoor su `{Pi, O}` +0.108 sui soli 64 episodi con overlap — lo strato
-`Pi=0, O=0` non contiene alcun episodio trattato e viene scartato, non riempito.
-`tests/test_hrisim.py` fissa questi numeri come regressione.
+ateflow reproduces the estimates of the reference thesis to the third decimal:
+naive −0.207 (sign inverted by confounding), backdoor on `{O}` +0.061, backdoor
+on `{Pi, O}` +0.108 on the 64 episodes with overlap — the stratum `Pi=0, O=0`
+contains no treated episode and is dropped, not imputed.
+`tests/test_hrisim.py` pins these numbers as a regression.
 
-## Cosa fa oggi
+## What it does today
 
-- DAG con controllo di aciclicità e parsing di catene (`a -> b -> c`)
-- d-separazione per moralizzazione del sottografo ancestrale
-- criterio di backdoor di Pearl, ricerca dell'insieme minimale e degli insiemi alternativi
-- rifiuto esplicito di mediatori, collider e discendenti del trattamento
-- stima per g-computation (con interazioni T*Z) e per stratificazione
-- intervalli bootstrap percentile
-- refutation test: placebo treatment, random common cause
+- DAG with acyclicity checking and chain parsing (`a -> b -> c`)
+- d-separation by moralization of the ancestral subgraph
+- Pearl's backdoor criterion, search for the minimal set and the alternative sets
+- explicit refusal of mediators, colliders, and descendants of the treatment
+- estimation by g-computation (with T*Z interactions) and by stratification
+- percentile bootstrap intervals
+- refutation tests: placebo treatment, random common cause
 
-## Cosa non fa (per scelta)
+## What it does not do (by choice)
 
-Trattamenti non binari, dati longitudinali, front-door, variabili strumentali,
-causal discovery, effetti eterogenei per sottogruppo. Sono estensioni, non requisiti.
+Non-binary treatments, longitudinal data, front-door, instrumental variables,
+causal discovery, heterogeneous effects by subgroup. They are extensions, not
+requirements.
 
-## Sviluppo
+## Development
 
 ```bash
 pip install -e ".[dev]"
@@ -89,5 +93,5 @@ python examples/make_data.py
 pytest -q
 ```
 
-`tests/test_estimate.py` è il test di regressione di tutto il progetto: se un
-refactoring rompe il recupero dell'ATE noto, la pipeline è rotta.
+`tests/test_estimate.py` is the regression test of the whole project: if a
+refactoring breaks the recovery of the known ATE, the pipeline is broken.

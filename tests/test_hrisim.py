@@ -1,9 +1,9 @@
-"""Regressione sui dati reali: i numeri della tesi (HRISim, 100 episodi).
+"""Regression on real data: the thesis numbers (HRISim, 100 episodes).
 
-Riferimenti: F. Baldo, *Causal Effect Estimation of Robot Actions for Human
-Aware Navigation*, cap. 5, e il notebook `analysis/hrisim_causal_analysis.ipynb`
-del repo PeopleFlow. Il DAG assunto e' Pi -> A -> Pe -> S -> T con il
-confonditore O -> A e O -> S; la variante aggiunge Pi -> Pe.
+References: F. Baldo, *Causal Effect Estimation of Robot Actions for Human
+Aware Navigation*, ch. 5, and the notebook `analysis/hrisim_causal_analysis.ipynb`
+in the PeopleFlow repo. The assumed DAG is Pi -> A -> Pe -> S -> T with the
+confounder entering as O -> A and O -> S; the variant adds Pi -> Pe.
 """
 
 import sys
@@ -55,14 +55,14 @@ def test_backdoor_on_Pi_O_uses_overlap_cells_only(data):
                        n_boot=0, refute=False)
     assert res.adjustment_set == ["O", "Pi"]
     assert res.adjusted.value == pytest.approx(0.108, abs=5e-4)
-    # Lo strato Pi=0, O=0 non contiene episodi con A=1: la policy non segnala
-    # mai a corridoio libero. I suoi 36 episodi vanno scartati, non riempiti.
+    # The stratum Pi=0, O=0 holds no episode with A=1: the policy never
+    # signals in a clear corridor. Its 36 episodes must be dropped, not imputed.
     assert res.adjusted.diagnostics["dropped_strata"] == 36
 
 
 def test_refutations_run_with_stratification(data):
-    # Regressione sul covariato casuale binario: con uno continuo la
-    # stratificazione degenera in strati singoli e la refutation esplode.
+    # Regression on the binary random covariate: a continuous one degenerates
+    # stratification into singleton strata and the refutation blows up.
     res = estimate_ate(data, BASE, "A", "T", method="stratification",
                        n_boot=0, refute=True)
     assert all(r["passed"] for r in res.refutations)

@@ -1,8 +1,8 @@
-"""Genera un dataset sintetico con paradosso di Simpson sullo scenario corridoio.
+"""Generates a synthetic dataset with a Simpson's paradox on the corridor scenario.
 
-Verità a terra: l'effetto causale del LED sulla velocità è +0.15.
-La stima naive risulta negativa perché il LED si accende più spesso quando
-il corridoio è affollato, e l'affollamento abbassa la velocità.
+Ground truth: the causal effect of the LED on speed is +0.15.
+The naive estimate comes out negative because the LED turns on more often
+when the corridor is crowded, and crowding lowers speed.
 """
 
 import numpy as np
@@ -13,16 +13,16 @@ TRUE_ATE = 0.15
 
 def make(n: int = 4000, seed: int = 7) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
-    crowding = rng.integers(0, 3, n)                     # 0 vuoto, 1 medio, 2 pieno
-    p_led = np.array([0.15, 0.5, 0.85])[crowding]        # confondimento
+    crowding = rng.integers(0, 3, n)                     # 0 empty, 1 medium, 2 full
+    p_led = np.array([0.15, 0.5, 0.85])[crowding]        # confounding
     led = rng.binomial(1, p_led)
     speed = (
         1.10
-        - 0.30 * crowding                                 # l'affollamento rallenta
-        + TRUE_ATE * led                                  # effetto causale del LED
+        - 0.30 * crowding                                 # crowding slows people down
+        + TRUE_ATE * led                                  # causal effect of the LED
         + rng.normal(0, 0.10, n)
     )
-    waiting_time = 2.0 - 0.8 * led + rng.normal(0, 0.3, n)  # discendente del trattamento
+    waiting_time = 2.0 - 0.8 * led + rng.normal(0, 0.3, n)  # descendant of the treatment
     return pd.DataFrame(
         {"crowding": crowding, "led": led, "speed": speed, "waiting_time": waiting_time}
     )
@@ -30,4 +30,4 @@ def make(n: int = 4000, seed: int = 7) -> pd.DataFrame:
 
 if __name__ == "__main__":
     make().to_csv("examples/corridor.csv", index=False)
-    print("scritto examples/corridor.csv  (ATE vero =", TRUE_ATE, ")")
+    print("wrote examples/corridor.csv  (true ATE =", TRUE_ATE, ")")

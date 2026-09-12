@@ -1,8 +1,8 @@
-"""Stimatori dell'ATE per trattamento binario.
+"""ATE estimators for a binary treatment.
 
-Due strade, entrambe con la stessa firma:
-  - `g_computation`: modello lineare dell'esito + standardizzazione sul campione
-  - `stratification`: formula di aggiustamento a strati (solo confonditori discreti)
+Two routes, both with the same signature:
+  - `g_computation`: linear outcome model + standardization over the sample
+  - `stratification`: stratified adjustment formula (discrete confounders only)
 """
 
 from __future__ import annotations
@@ -23,20 +23,20 @@ class Estimate:
     diagnostics: dict = field(default_factory=dict)
 
     def __str__(self) -> str:
-        ci = f"  IC95% [{self.ci[0]:+.3f}, {self.ci[1]:+.3f}]" if self.ci else ""
-        adj = ", ".join(self.adjustment_set) or "nessuno"
-        return f"{self.method:<16} ATE = {self.value:+.3f}{ci}   aggiusto per: {adj}"
+        ci = f"  95% CI [{self.ci[0]:+.3f}, {self.ci[1]:+.3f}]" if self.ci else ""
+        adj = ", ".join(self.adjustment_set) or "none"
+        return f"{self.method:<16} ATE = {self.value:+.3f}{ci}   adjusting for: {adj}"
 
 
 def _check_binary(series: pd.Series, name: str) -> np.ndarray:
     values = pd.unique(series.dropna())
     if not set(values) <= {0, 1, True, False}:
-        raise ValueError(f"{name!r} deve essere binaria 0/1, trovati valori {sorted(values)[:5]}")
+        raise ValueError(f"{name!r} must be binary 0/1, found values {sorted(values)[:5]}")
     return series.astype(float).to_numpy()
 
 
 def _design_matrix(df: pd.DataFrame, covariates: list[str]) -> np.ndarray:
-    """Matrice di disegno: numeriche così come sono, categoriche con dummy."""
+    """Design matrix: numeric columns as they are, categorical ones as dummies."""
     if not covariates:
         return np.empty((len(df), 0))
     block = pd.get_dummies(df[covariates], drop_first=True, dtype=float)
@@ -44,7 +44,7 @@ def _design_matrix(df: pd.DataFrame, covariates: list[str]) -> np.ndarray:
 
 
 def naive(df: pd.DataFrame, treatment: str, outcome: str) -> Estimate:
-    """Differenza di medie fra trattati e non trattati. Nessun aggiustamento."""
+    """Difference in means between treated and untreated. No adjustment."""
     t = _check_binary(df[treatment], treatment)
     y = df[outcome].astype(float).to_numpy()
     value = y[t == 1].mean() - y[t == 0].mean()
@@ -58,10 +58,10 @@ def g_computation(
     adjustment_set: list[str],
     interactions: bool = True,
 ) -> Estimate:
-    """ATE per standardizzazione: E[Y|T=1,Z] - E[Y|T=0,Z] mediato sulla distribuzione di Z.
+    """ATE by standardization: E[Y|T=1,Z] - E[Y|T=0,Z] averaged over the distribution of Z.
 
-    Il modello dell'esito è lineare nei covariati. Con `interactions=True` include
-    i termini T*Z, quindi ammette effetti eterogenei.
+    The outcome model is linear in the covariates. With `interactions=True` it
+    includes the T*Z terms, so it allows heterogeneous effects.
     """
     t = _check_binary(df[treatment], treatment)
     y = df[outcome].astype(float).to_numpy()
@@ -96,10 +96,10 @@ def stratification(
     outcome: str,
     adjustment_set: list[str],
 ) -> Estimate:
-    """Formula di aggiustamento: media degli effetti di strato, pesata per P(Z).
+    """Adjustment formula: average of the stratum effects, weighted by P(Z).
 
-    Gli strati senza entrambi i bracci di trattamento vengono scartati e riportati
-    in `diagnostics['dropped_strata']`: se sono molti, la positività è debole.
+    Strata that do not contain both treatment arms are dropped and reported in
+    `diagnostics['dropped_strata']`: if there are many, positivity is weak.
     """
     t = _check_binary(df[treatment], treatment)
     work = df.assign(**{treatment: t})
@@ -119,7 +119,7 @@ def stratification(
         weight_used += w
 
     if weight_used == 0:
-        raise ValueError("nessuno strato contiene entrambi i bracci: positività violata")
+        raise ValueError("no stratum contains both treatment arms: positivity violated")
     return Estimate(
         value=float(total / weight_used),
         method="stratification",
@@ -139,7 +139,7 @@ def bootstrap_ci(
     alpha: float = 0.05,
     seed: int = 0,
 ) -> tuple[float, float]:
-    """Intervallo percentile su ricampionamento con reimmissione."""
+    """Percentile interval over resampling with replacement."""
     rng = np.random.default_rng(seed)
     draws = []
     for _ in range(n_boot):
@@ -149,7 +149,7 @@ def bootstrap_ci(
         except ValueError:
             continue
     if len(draws) < n_boot // 2:
-        raise ValueError("troppi ricampionamenti degeneri: campione o strati insufficienti")
+        raise ValueError("too many degenerate resamples: sample or strata too small")
     lo, hi = np.quantile(draws, [alpha / 2, 1 - alpha / 2])
     return float(lo), float(hi)
 
@@ -157,7 +157,7 @@ def bootstrap_ci(
 def refute_placebo_treatment(
     estimator, df: pd.DataFrame, treatment: str, n_sim: int = 50, seed: int = 0
 ) -> dict:
-    """Permuta il trattamento: una stima corretta deve collassare verso zero."""
+    """Permutes the treatment: a correct estimate must collapse towards zero."""
     rng = np.random.default_rng(seed)
     values = []
     for _ in range(n_sim):
@@ -179,10 +179,11 @@ def refute_placebo_treatment(
 def refute_random_common_cause(
     estimator_factory, df: pd.DataFrame, original: float, n_sim: int = 20, seed: int = 0
 ) -> dict:
-    """Aggiunge un covariato casuale all'aggiustamento: la stima deve restare stabile.
+    """Adds a random covariate to the adjustment: the estimate must stay stable.
 
-    Il covariato è binario, così il test vale anche per la stratificazione:
-    uno continuo renderebbe ogni strato un singolo caso, violando la positività.
+    The covariate is binary, so the test also works for stratification: a
+    continuous one would turn every stratum into a single case, violating
+    positivity.
     """
     rng = np.random.default_rng(seed)
     values = []
@@ -194,8 +195,8 @@ def refute_random_common_cause(
     sd = float(arr.std(ddof=1)) if len(arr) > 1 else 0.0
     return {
         "test": "random_common_cause",
-        # Lo spostamento sistematico è il segnale; il singolo ricampionamento
-        # può oscillare quanto vuole il rumore campionario senza dire nulla.
+        # The systematic shift is the signal; any single resample may wander
+        # with sampling noise without telling us anything.
         "shift": shift,
         "max_drift": float(np.abs(arr - original).max()),
         "passed": bool(abs(shift) < 2 * sd / np.sqrt(len(arr)) + 1e-9)

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ateflow"
 version = "0.1.0"
-description = "Stima di effetti causali da un DAG dichiarativo"
+description = "Causal effect estimation from a declarative DAG"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24", "pandas>=2.0"]

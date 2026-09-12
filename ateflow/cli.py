@@ -1,4 +1,4 @@
-"""CLI: riproduce una stima da un CSV e un file .dag, senza scrivere codice."""
+"""CLI: reproduces an estimate from a CSV and a .dag file, no code required."""
 
 from __future__ import annotations
 
@@ -13,15 +13,15 @@ from .graph import DAG
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ateflow", description=__doc__)
-    p.add_argument("--data", required=True, help="percorso del CSV")
-    p.add_argument("--dag", required=True, help="percorso del file .dag")
+    p.add_argument("--data", required=True, help="path to the CSV")
+    p.add_argument("--dag", required=True, help="path to the .dag file")
     p.add_argument("--treatment", required=True)
     p.add_argument("--outcome", required=True)
     p.add_argument("--method", default="g-computation",
                    choices=["g-computation", "stratification"])
     p.add_argument("--adjust", nargs="*", default=None,
-                   help="forza l'insieme di aggiustamento (viene validato)")
-    p.add_argument("--boot", type=int, default=500, help="ricampionamenti bootstrap, 0 per saltare")
+                   help="force the adjustment set (it is validated)")
+    p.add_argument("--boot", type=int, default=500, help="bootstrap resamples, 0 to skip")
     p.add_argument("--no-refute", action="store_true")
     p.add_argument("--seed", type=int, default=0)
     return p
@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
         )
     except ValueError as exc:
-        print(f"errore: {exc}", file=sys.stderr)
+        print(f"error: {exc}", file=sys.stderr)
         return 2
     print(result.report())
     return 0

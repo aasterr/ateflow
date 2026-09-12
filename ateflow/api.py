@@ -1,7 +1,7 @@
-"""Superficie pubblica della libreria: una domanda, una risposta.
+"""Public surface of the library: one question, one answer.
 
-    dato un trattamento binario e un DAG,
-    quanto cambia l'esito al netto dei confonditori?
+    given a binary treatment and a DAG,
+    how much does the outcome change net of confounders?
 """
 
 from __future__ import annotations
@@ -32,12 +32,12 @@ class Result:
 
     @property
     def confounding_bias(self) -> float:
-        """Quanto il confondimento sposta la stima non aggiustata."""
+        """How far confounding moves the unadjusted estimate."""
         return self.naive.value - self.adjusted.value
 
     @property
     def sign_flip(self) -> bool:
-        """True se l'aggiustamento inverte il segno dell'effetto (Simpson)."""
+        """True if the adjustment flips the sign of the effect (Simpson)."""
         return self.naive.value * self.adjusted.value < 0
 
     def report(self) -> str:
@@ -45,14 +45,14 @@ class Result:
             f"{self.naive}",
             f"{self.adjusted}",
             "",
-            f"bias da confondimento : {self.confounding_bias:+.3f}",
-            f"inversione di segno   : {'SI' if self.sign_flip else 'no'}",
+            f"confounding bias : {self.confounding_bias:+.3f}",
+            f"sign flip        : {'YES' if self.sign_flip else 'no'}",
         ]
         if self.alternatives:
             alts = " | ".join("{" + ", ".join(sorted(s)) + "}" for s in self.alternatives[:4])
-            lines.append(f"altri set validi      : {alts}")
+            lines.append(f"other valid sets : {alts}")
         for ref in self.refutations:
-            flag = "ok" if ref["passed"] else "SOSPETTO"
+            flag = "ok" if ref["passed"] else "SUSPECT"
             detail = ", ".join(
                 f"{k}={v:+.4f}" for k, v in ref.items() if isinstance(v, float)
             )
@@ -71,34 +71,34 @@ def estimate_ate(
     refute: bool = True,
     seed: int = 0,
 ) -> Result:
-    """Stima l'ATE identificando l'insieme di aggiustamento dal DAG.
+    """Estimates the ATE, identifying the adjustment set from the DAG.
 
-    `dag` accetta un oggetto DAG o direttamente il testo in formato 'A -> B'.
-    Se `adjustment_set` è passato, viene validato contro il criterio di backdoor
-    invece di essere cercato.
+    `dag` accepts a DAG object or the text in 'A -> B' format directly.
+    If `adjustment_set` is given, it is validated against the backdoor
+    criterion instead of being searched for.
     """
     graph = dag if isinstance(dag, DAG) else DAG.parse(dag)
 
     missing = (graph.nodes - set(data.columns)) - {"_rcc"}
     if missing:
-        raise ValueError(f"variabili nel DAG assenti dai dati: {sorted(missing)}")
+        raise ValueError(f"DAG variables missing from the data: {sorted(missing)}")
     for name in (treatment, outcome):
         if name not in graph.nodes:
-            raise ValueError(f"{name!r} non compare nel DAG")
+            raise ValueError(f"{name!r} does not appear in the DAG")
 
     if adjustment_set is None:
         chosen = sorted(graph.minimal_backdoor_set(treatment, outcome))
     else:
         if not graph.satisfies_backdoor(treatment, outcome, adjustment_set):
             raise ValueError(
-                f"{sorted(adjustment_set)} non soddisfa il criterio di backdoor per "
+                f"{sorted(adjustment_set)} does not satisfy the backdoor criterion for "
                 f"{treatment} -> {outcome}"
             )
         chosen = sorted(adjustment_set)
 
     estimators = {"g-computation": g_computation, "stratification": stratification}
     if method not in estimators:
-        raise ValueError(f"metodo sconosciuto {method!r}, usa uno di {sorted(estimators)}")
+        raise ValueError(f"unknown method {method!r}, use one of {sorted(estimators)}")
     fn = estimators[method]
 
     def run(frame: pd.DataFrame, extra: list[str] | None = None) -> Estimate:

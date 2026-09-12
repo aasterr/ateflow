@@ -1,7 +1,7 @@
-# Scenario corridoio: il segnale LED del robot influenza la velocità umana,
-# ma l'affollamento è un confonditore (guida sia l'attivazione del LED sia la velocità).
+# Corridor scenario: the robot's LED signal influences human walking speed,
+# but crowding is a confounder (it drives both LED activation and speed).
 crowding -> led
 crowding -> speed
 led -> speed
-# il tempo di attesa è un discendente del trattamento: NON va aggiustato
+# waiting time is a descendant of the treatment: it must NOT be adjusted for
 led -> waiting_time

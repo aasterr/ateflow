@@ -1,6 +1,6 @@
-"""DAG dichiarativo, d-separazione e identificazione di insiemi di aggiustamento.
+"""Declarative DAG, d-separation, and identification of adjustment sets.
 
-Nessuna dipendenza esterna: solo stdlib.
+No external dependencies: stdlib only.
 """
 
 from __future__ import annotations
@@ -14,16 +14,16 @@ class CyclicGraphError(ValueError):
 
 
 class DAG:
-    """DAG diretto aciclico definito per archi.
+    """Directed acyclic graph defined by its edges.
 
-    Formato testuale accettato da `DAG.parse` (una relazione per riga):
+    Text format accepted by `DAG.parse` (one relation per line):
 
-        # commento
+        # comment
         crowding -> speed
         crowding -> led
         led -> speed
 
-    I nomi dei nodi sono stringhe senza spazi.
+    Node names are strings without spaces.
     """
 
     def __init__(self, edges: Iterable[tuple[str, str]] = ()):
@@ -32,7 +32,7 @@ class DAG:
         for src, dst in edges:
             self.add_edge(src, dst)
 
-    # ---------- costruzione ----------
+    # ---------- construction ----------
 
     def add_node(self, node: str) -> None:
         self._parents.setdefault(node, set())
@@ -40,7 +40,7 @@ class DAG:
 
     def add_edge(self, src: str, dst: str) -> None:
         if src == dst:
-            raise CyclicGraphError(f"self-loop su {src!r}")
+            raise CyclicGraphError(f"self-loop on {src!r}")
         self.add_node(src)
         self.add_node(dst)
         self._children[src].add(dst)
@@ -48,7 +48,7 @@ class DAG:
         if self._has_cycle():
             self._children[src].discard(dst)
             self._parents[dst].discard(src)
-            raise CyclicGraphError(f"l'arco {src} -> {dst} introduce un ciclo")
+            raise CyclicGraphError(f"edge {src} -> {dst} introduces a cycle")
 
     @classmethod
     def parse(cls, text: str) -> "DAG":
@@ -58,14 +58,14 @@ class DAG:
             if not line:
                 continue
             if "->" not in line:
-                # nodo isolato (es. una variabile non connessa)
+                # isolated node (e.g. a disconnected variable)
                 if len(line.split()) == 1:
                     dag.add_node(line)
                     continue
-                raise ValueError(f"riga {lineno}: attesa la forma 'A -> B', trovato {raw!r}")
+                raise ValueError(f"line {lineno}: expected the form 'A -> B', found {raw!r}")
             chain = [tok.strip() for tok in line.split("->")]
             if any(not tok or " " in tok for tok in chain):
-                raise ValueError(f"riga {lineno}: nome di nodo non valido in {raw!r}")
+                raise ValueError(f"line {lineno}: invalid node name in {raw!r}")
             for src, dst in zip(chain, chain[1:]):
                 dag.add_edge(src, dst)
         return dag
@@ -75,7 +75,7 @@ class DAG:
         with open(path, encoding="utf-8") as fh:
             return cls.parse(fh.read())
 
-    # ---------- accesso ----------
+    # ---------- access ----------
 
     @property
     def nodes(self) -> set[str]:
@@ -125,28 +125,28 @@ class DAG:
         return any(color[n] == WHITE and visit(n) for n in list(color))
 
     def without_outgoing(self, node: str) -> "DAG":
-        """Grafo manipolato G_{\\bar{X}}: rimuove gli archi uscenti da `node`."""
+        """Manipulated graph G_{\\bar{X}}: removes the edges leaving `node`."""
         kept = [(s, d) for s, d in self.edges if s != node]
         sub = DAG(kept)
         for n in self.nodes:
             sub.add_node(n)
         return sub
 
-    # ---------- d-separazione ----------
+    # ---------- d-separation ----------
 
     def d_separated(self, x: str, y: str, given: Iterable[str] = ()) -> bool:
-        """True se x e y sono d-separati dato `given`.
+        """True if x and y are d-separated given `given`.
 
-        Implementazione per moralizzazione del sottografo ancestrale, che è
-        equivalente alla d-separazione ed è facile da verificare a mano.
+        Implemented by moralization of the ancestral subgraph, which is
+        equivalent to d-separation and easy to verify by hand.
         """
         z = set(given)
         if x in z or y in z:
-            raise ValueError("x e y non possono comparire nell'insieme condizionante")
+            raise ValueError("x and y cannot appear in the conditioning set")
         relevant = {x, y} | z
         keep = relevant | self.ancestors(relevant)
 
-        # moralizzazione: archi non orientati + unione dei genitori di ogni nodo
+        # moralization: undirected edges + marrying the parents of each node
         undirected: dict[str, set[str]] = {n: set() for n in keep}
         for n in keep:
             ps = self._parents[n] & keep
@@ -157,7 +157,7 @@ class DAG:
                 undirected[a].add(b)
                 undirected[b].add(a)
 
-        # rimuovo i nodi condizionanti e cerco un cammino residuo
+        # remove the conditioning nodes and look for a remaining path
         for n in z:
             for m in undirected.get(n, set()):
                 undirected[m].discard(n)
@@ -176,10 +176,10 @@ class DAG:
                     stack.append(nxt)
         return True
 
-    # ---------- identificazione ----------
+    # ---------- identification ----------
 
     def satisfies_backdoor(self, treatment: str, outcome: str, adjustment: Iterable[str]) -> bool:
-        """Criterio di backdoor di Pearl per l'insieme `adjustment`."""
+        """Pearl's backdoor criterion for the set `adjustment`."""
         z = set(adjustment)
         if z & (self.descendants([treatment]) | {treatment}):
             return False
@@ -188,7 +188,7 @@ class DAG:
         return self.without_outgoing(treatment).d_separated(treatment, outcome, z)
 
     def backdoor_sets(self, treatment: str, outcome: str, max_size: int | None = None) -> list[set[str]]:
-        """Tutti gli insiemi di aggiustamento validi, ordinati per cardinalità."""
+        """Every valid adjustment set, ordered by cardinality."""
         forbidden = self.descendants([treatment]) | {treatment, outcome}
         candidates = sorted(self.nodes - forbidden)
         limit = len(candidates) if max_size is None else min(max_size, len(candidates))
@@ -200,12 +200,12 @@ class DAG:
         return valid
 
     def minimal_backdoor_set(self, treatment: str, outcome: str) -> set[str]:
-        """Insieme di aggiustamento minimale. Solleva se l'effetto non è identificabile."""
+        """Minimal adjustment set. Raises if the effect is not identifiable."""
         sets = self.backdoor_sets(treatment, outcome)
         if not sets:
             raise ValueError(
-                f"nessun insieme di backdoor valido per {treatment} -> {outcome}: "
-                "l'effetto non è identificabile da questo DAG con la sola aggiustamento"
+                f"no valid backdoor set for {treatment} -> {outcome}: "
+                "the effect is not identifiable from this DAG by adjustment alone"
             )
         return min(sets, key=lambda s: (len(s), sorted(s)))
 
