@@ -48,11 +48,11 @@ const examples = call("examples", {});
 lap("examples (read + profile)");
 
 const dag = (name) => examples[name].dag;
-const hrisim = call("estimate", { example: "hrisim", dag: dag("hrisim"), treatment: "A", outcome: "T", method: "stratification", boot: 0, refute: false });
-expect("hrisim stratification", hrisim.adjusted.value, 0.061);
+const hrisim = call("estimate", { example: "hrisim", dag: dag("hrisim"), treatment: "A", outcome: "T", method: "adjustment-formula", boot: 0, refute: false });
+expect("hrisim adjustment formula", hrisim.adjusted.value, 0.061);
 expect("hrisim naive", hrisim.naive.value, -0.207);
 
-for (const method of ["stratification", "g-computation", "ipw", "aipw"]) {
+for (const method of ["adjustment-formula", "g-computation", "ipw", "aipw"]) {
   t = performance.now();
   const r = call("estimate", { example: "onboarding", dag: dag("onboarding"), treatment: "onboarding_email", outcome: "retained_30d", method, boot: 500, refute: true });
   lap(`onboarding ${method} (500 boot + refute)`);
@@ -86,7 +86,7 @@ const err = JSON.parse(handle("estimate", JSON.stringify({ example: "hrisim", da
 console.log(`${err.status === 422 ? "ok  " : "FAIL"} errors come back as values: ${err.error}`);
 if (err.status !== 422) failures++;
 
-const html = call("report", { analysis: { name: "smoke", created_at: new Date().toISOString(), source: "example: hrisim", dag: dag("hrisim"), treatment: "A", outcome: "T", method: "stratification", result: hrisim } }).html;
+const html = call("report", { analysis: { name: "smoke", created_at: new Date().toISOString(), source: "example: hrisim", dag: dag("hrisim"), treatment: "A", outcome: "T", method: "adjustment-formula", result: hrisim } }).html;
 console.log(`${html.includes("<svg") ? "ok  " : "FAIL"} report renders (${html.length} chars)`);
 
 process.exit(failures ? 1 : 0);

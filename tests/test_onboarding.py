@@ -25,7 +25,7 @@ def data():
     return make_onboarding()
 
 
-@pytest.mark.parametrize("method", ["g-computation", "stratification"])
+@pytest.mark.parametrize("method", ["g-computation", "adjustment-formula"])
 def test_recovers_true_ate(data, method):
     res = estimate_ate(data, DAG_, T, Y, method=method, n_boot=0, refute=False)
     assert res.adjustment_set == ["channel", "plan"]

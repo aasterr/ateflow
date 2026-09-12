@@ -290,7 +290,7 @@ export default function App() {
   const [graphKey, setGraphKey] = useState(0);
   const [treatment, setTreatment] = useState("");
   const [outcome, setOutcome] = useState("");
-  const [method, setMethod] = useState("stratification");
+  const [method, setMethod] = useState("adjustment-formula");
   const [check, setCheck] = useState(null); // {minimal, error}
   const [result, setResult] = useState(null);
   const [resultKey, setResultKey] = useState("");
@@ -689,7 +689,7 @@ export default function App() {
             <label>
               method
               <select value={method} onChange={(e) => setMethod(e.target.value)}>
-                <option value="stratification">stratification</option>
+                <option value="adjustment-formula">adjustment formula</option>
                 <option value="g-computation">g-computation</option>
                 <option value="ipw">IPW (weighting)</option>
                 <option value="aipw">AIPW (doubly robust)</option>
@@ -763,11 +763,11 @@ export default function App() {
             <dl>
               <dt>confounding bias</dt>
               <dd>{result.confounding_bias.toFixed(3)}</dd>
-              {result.adjusted.diagnostics.dropped_strata > 0 && (
+              {result.adjusted.diagnostics.dropped_rows > 0 && (
                 <>
                   <dt>dropped (no overlap)</dt>
                   <dd>
-                    {result.adjusted.diagnostics.dropped_strata} of {result.adjusted.n} rows
+                    {result.adjusted.diagnostics.dropped_rows} of {result.adjusted.n} rows
                   </dd>
                 </>
               )}

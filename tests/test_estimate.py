@@ -17,7 +17,7 @@ def data():
     return make()
 
 
-@pytest.mark.parametrize("method", ["g-computation", "stratification"])
+@pytest.mark.parametrize("method", ["g-computation", "adjustment-formula"])
 def test_recovers_true_ate(data, method):
     res = estimate_ate(data, DAG_TEXT, "led", "speed", method=method, n_boot=0, refute=False)
     assert res.adjustment_set == ["crowding"]

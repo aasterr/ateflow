@@ -26,12 +26,12 @@ def base():
 
 @pytest.fixture(scope="module")
 def reference(base):
-    return estimate_ate(base, DAG, "t", "y", method="stratification", n_boot=0, refute=False)
+    return estimate_ate(base, DAG, "t", "y", method="adjustment-formula", n_boot=0, refute=False)
 
 
 def _estimate(raw: bytes, dag=DAG, **kw):
     df, _ = read_csv(raw)
-    kw.setdefault("method", "stratification")
+    kw.setdefault("method", "adjustment-formula")
     return estimate_ate(df, dag, "t", "y", n_boot=0, refute=False, **kw)
 
 
@@ -123,7 +123,7 @@ def test_outcome_with_units_is_refused(base):
 
 
 @pytest.mark.parametrize("column", ["t", "y", "z"])
-@pytest.mark.parametrize("method", ["stratification", "g-computation", "ipw", "aipw"])
+@pytest.mark.parametrize("method", ["adjustment-formula", "g-computation", "ipw", "aipw"])
 def test_incomplete_rows_are_dropped_and_reported(base, column, method):
     b = base.astype(object)
     b.loc[:9, column] = np.nan
@@ -145,7 +145,7 @@ def test_identifier_as_confounder_is_refused(base):
                   method="g-computation")
 
 
-def test_stratification_on_continuous_confounder_points_to_other_methods(base):
+def test_adjustment_formula_on_continuous_confounder_points_to_other_methods(base):
     raw = base.assign(z=np.random.default_rng(1).normal(size=len(base))).to_csv(index=False).encode()
     with pytest.raises(DataError, match="g-computation, IPW or AIPW"):
         _estimate(raw)

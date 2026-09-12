@@ -20,7 +20,7 @@ from .estimate import (
     naive,
     refute_placebo_treatment,
     refute_random_common_cause,
-    stratification,
+    adjustment_formula,
 )
 from .graph import DAG
 
@@ -120,7 +120,7 @@ def estimate_ate(
 
     estimators = {
         "g-computation": g_computation,
-        "stratification": stratification,
+        "adjustment-formula": adjustment_formula,
         "ipw": ipw,
         "aipw": aipw,
     }

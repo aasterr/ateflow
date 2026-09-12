@@ -37,13 +37,13 @@ def test_minimal_backdoor_sets():
 
 
 def test_naive_estimate_is_confounded_and_sign_inverted(data):
-    res = estimate_ate(data, BASE, "A", "T", method="stratification",
+    res = estimate_ate(data, BASE, "A", "T", method="adjustment-formula",
                        n_boot=0, refute=False)
     assert res.naive.value == pytest.approx(-0.207, abs=5e-4)
     assert res.sign_flip
 
 
-@pytest.mark.parametrize("method", ["stratification", "g-computation"])
+@pytest.mark.parametrize("method", ["adjustment-formula", "g-computation"])
 def test_backdoor_on_O_recovers_primary_estimate(data, method):
     res = estimate_ate(data, BASE, "A", "T", method=method, n_boot=0, refute=False)
     assert res.adjustment_set == ["O"]
@@ -51,19 +51,19 @@ def test_backdoor_on_O_recovers_primary_estimate(data, method):
 
 
 def test_backdoor_on_Pi_O_uses_overlap_cells_only(data):
-    res = estimate_ate(data, VARIANT, "A", "T", method="stratification",
+    res = estimate_ate(data, VARIANT, "A", "T", method="adjustment-formula",
                        n_boot=0, refute=False)
     assert res.adjustment_set == ["O", "Pi"]
     assert res.adjusted.value == pytest.approx(0.108, abs=5e-4)
-    # The stratum Pi=0, O=0 holds no episode with A=1: the policy never
+    # The group Pi=0, O=0 holds no episode with A=1: the policy never
     # signals in a clear corridor. Its 36 episodes must be dropped, not imputed.
-    assert res.adjusted.diagnostics["dropped_strata"] == 36
+    assert res.adjusted.diagnostics["dropped_rows"] == 36
 
 
-def test_refutations_run_with_stratification(data):
+def test_refutations_run_with_adjustment_formula(data):
     # Regression on the binary random covariate: a continuous one degenerates
-    # stratification into singleton strata and the refutation blows up.
-    res = estimate_ate(data, BASE, "A", "T", method="stratification",
+    # the adjustment formula into singleton groups and the refutation blows up.
+    res = estimate_ate(data, BASE, "A", "T", method="adjustment-formula",
                        n_boot=0, refute=True)
     assert all(r["passed"] for r in res.refutations)
 

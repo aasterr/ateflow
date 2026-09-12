@@ -2,7 +2,7 @@
 
 Four routes, all with the same signature:
   - `g_computation`: linear outcome model + standardization over the sample
-  - `stratification`: stratified adjustment formula (discrete confounders only)
+  - `adjustment_formula`: backdoor adjustment formula, exact within groups (discrete confounders only)
   - `ipw`: logistic propensity model + inverse probability weighting
   - `aipw`: doubly robust, outcome model plus propensity-weighted correction
 """
@@ -106,7 +106,7 @@ PROPENSITY_CLIP = 0.01
 def _propensity(t: np.ndarray, z: np.ndarray, ridge: float = 1e-4, iters: int = 50) -> np.ndarray:
     """P(T=1 | Z) by logistic regression, fitted with Newton-Raphson.
 
-    A tiny ridge keeps the fit finite under separation (a stratum with no
+    A tiny ridge keeps the fit finite under separation (a group with no
     treated units), where the unpenalized coefficients would diverge.
     """
     x = np.column_stack([np.ones(len(t)), z])
@@ -133,7 +133,7 @@ def _propensity_scores(
     per observed combination, which is just the treated share of that cell
     (the exact maximum-likelihood fit, computed in closed form). An additive
     logistic model would smooth over a cell with no treated units and hide the
-    positivity violation that stratification reports. Continuous confounders
+    positivity violation that the adjustment formula reports. Continuous confounders
     go through the logistic regression.
     """
     if covariates and all(df[c].nunique(dropna=False) <= max_levels for c in covariates):
@@ -215,16 +215,16 @@ def aipw(
     )
 
 
-def stratification(
+def adjustment_formula(
     df: pd.DataFrame,
     treatment: str,
     outcome: str,
     adjustment_set: list[str],
 ) -> Estimate:
-    """Adjustment formula: average of the stratum effects, weighted by P(Z).
+    """Adjustment formula: average of the within-group effects, weighted by P(Z).
 
-    Strata that do not contain both treatment arms are dropped and reported in
-    `diagnostics['dropped_strata']`: if there are many, positivity is weak.
+    Groups that do not contain both treatment arms are dropped and their rows
+    counted in `diagnostics['dropped_rows']`: if there are many, positivity is weak.
     """
     t = _check_binary(df[treatment], treatment)
     work = df.assign(**{treatment: t})
@@ -232,26 +232,26 @@ def stratification(
         return naive(work, treatment, outcome)
 
     total, weight_used, dropped = 0.0, 0.0, 0
-    for _, stratum in work.groupby(adjustment_set, dropna=False, observed=True):
-        arms = stratum[treatment].unique()
+    for _, group in work.groupby(adjustment_set, dropna=False, observed=True):
+        arms = group[treatment].unique()
         if not {0.0, 1.0} <= set(arms):
-            dropped += len(stratum)
+            dropped += len(group)
             continue
-        treated = stratum.loc[stratum[treatment] == 1, outcome].mean()
-        control = stratum.loc[stratum[treatment] == 0, outcome].mean()
-        w = len(stratum) / len(work)
+        treated = group.loc[group[treatment] == 1, outcome].mean()
+        control = group.loc[group[treatment] == 0, outcome].mean()
+        w = len(group) / len(work)
         total += w * (treated - control)
         weight_used += w
 
     if weight_used == 0:
-        raise ValueError("no stratum contains both treatment arms: positivity violated")
+        raise ValueError("no group of confounder values contains both treatment arms: positivity violated")
     return Estimate(
         value=float(total / weight_used),
-        method="stratification",
+        method="adjustment-formula",
         adjustment_set=list(adjustment_set),
         n=len(work),
         diagnostics={
-            "dropped_strata": dropped,
+            "dropped_rows": dropped,
             "dropped_fraction": round(dropped / len(work), 4),
         },
     )
@@ -274,7 +274,7 @@ def bootstrap_ci(
         except ValueError:
             continue
     if len(draws) < n_boot // 2:
-        raise ValueError("too many degenerate resamples: sample or strata too small")
+        raise ValueError("too many degenerate resamples: sample or groups too small")
     lo, hi = np.quantile(draws, [alpha / 2, 1 - alpha / 2])
     return float(lo), float(hi)
 
@@ -306,8 +306,8 @@ def refute_random_common_cause(
 ) -> dict:
     """Adds a random covariate to the adjustment: the estimate must stay stable.
 
-    The covariate is binary, so the test also works for stratification: a
-    continuous one would turn every stratum into a single case, violating
+    The covariate is binary, so the test also works for the adjustment formula: a
+    continuous one would turn every group into a single case, violating
     positivity.
     """
     rng = np.random.default_rng(seed)

@@ -96,12 +96,12 @@ confounder (`O`).
 
 ```bash
 python -m ateflow --data examples/episodes_100_v1.csv --dag examples/hrisim.dag \
-    --treatment A --outcome T --method stratification
+    --treatment A --outcome T --method adjustment-formula
 ```
 
 ateflow reproduces the estimates of the reference thesis to the third decimal:
 naive −0.207 (sign inverted by confounding), backdoor on `{O}` +0.061, backdoor
-on `{Pi, O}` +0.108 on the 64 episodes with overlap — the stratum `Pi=0, O=0`
+on `{Pi, O}` +0.108 on the 64 episodes with overlap — the group `Pi=0, O=0`
 contains no treated episode and is dropped, not imputed.
 `tests/test_hrisim.py` pins these numbers as a regression.
 
@@ -141,7 +141,7 @@ When a question is asked:
 - the outcome must be numeric or have two values (you choose which counts as 1)
 - rows with a missing value in the variables the question uses are dropped;
   how many, and because of which column, is reported with the result
-- an ID or free-text column cannot be adjusted for, and stratification refuses
+- an ID or free-text column cannot be adjusted for, and the adjustment formula refuses
   continuous confounders — the error says what to do instead
 
 The same checks run from the CLI (`--treated-value`, `--outcome-positive`)
@@ -175,7 +175,7 @@ docker run -p 8080:8080 -v ateflow_data:/data ateflow
 - d-separation by moralization of the ancestral subgraph
 - Pearl's backdoor criterion, search for the minimal set and the alternative sets
 - explicit refusal of mediators, colliders, and descendants of the treatment
-- estimation by g-computation (with T*Z interactions) and by stratification
+- estimation by g-computation (with T*Z interactions) and by the adjustment formula (exact within groups of confounder values)
 - inverse probability weighting and doubly robust AIPW, with overlap
   diagnostics: clipped propensities and effective sample size. With discrete
   confounders the propensity model is saturated, so a cell with no treated

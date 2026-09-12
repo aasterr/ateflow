@@ -38,7 +38,7 @@ EXAMPLES_DIR = Path(os.environ.get("ATEFLOW_EXAMPLES",
 
 # Each example carries a short guide for the demo: the question, why the naive
 # and adjusted answers differ, and DAG edits worth trying. The numbers quoted
-# are stratification estimates on the bundled data (the UI default method);
+# are adjustment-formula estimates on the bundled data (the UI default method);
 # tests/test_server.py applies every `edit` and checks the result against `expect`,
 # so the texts cannot drift away from what the demo actually shows.
 EXAMPLES = {

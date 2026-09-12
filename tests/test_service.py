@@ -21,7 +21,7 @@ def test_examples_and_estimate_by_example_name():
     examples = call("examples")["ok"]
     assert set(examples) == {"corridor", "onboarding", "hrisim"}
     out = call("estimate", {"example": "hrisim", "dag": HRISIM_DAG, "treatment": "A",
-                            "outcome": "T", "method": "stratification", "boot": 0,
+                            "outcome": "T", "method": "adjustment-formula", "boot": 0,
                             "refute": False})["ok"]
     assert out["adjusted"]["value"] == pytest.approx(0.061, abs=5e-4)
 
@@ -49,11 +49,11 @@ def test_bugs_are_values_too_with_a_trace():
 
 def test_report_renders_from_a_stored_result():
     result = call("estimate", {"example": "hrisim", "dag": HRISIM_DAG, "treatment": "A",
-                               "outcome": "T", "method": "stratification", "boot": 0,
+                               "outcome": "T", "method": "adjustment-formula", "boot": 0,
                                "refute": False})["ok"]
     html = call("report", {"analysis": {
         "name": "run", "created_at": "2026-09-13T10:00:00+00:00", "source": "example: hrisim",
-        "dag": HRISIM_DAG, "treatment": "A", "outcome": "T", "method": "stratification",
+        "dag": HRISIM_DAG, "treatment": "A", "outcome": "T", "method": "adjustment-formula",
         "result": result,
     }})["ok"]["html"]
     assert "<svg" in html and "+0.061" in html

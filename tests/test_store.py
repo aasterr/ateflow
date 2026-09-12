@@ -25,7 +25,7 @@ def client(tmp_path, monkeypatch):
 def _save(client, name="thesis run"):
     return client.post("/api/analyses", data={
         "name": name, "dag": HRISIM_DAG, "treatment": "A", "outcome": "T",
-        "method": "stratification", "example": "hrisim", "boot": 50,
+        "method": "adjustment-formula", "example": "hrisim", "boot": 50,
     })
 
 
@@ -55,7 +55,7 @@ def test_estimate_can_reuse_saved_data(client):
     analysis_id = _save(client).json()["id"]
     res = client.post("/api/estimate", data={
         "dag": HRISIM_DAG, "treatment": "A", "outcome": "T",
-        "method": "stratification", "saved": analysis_id, "boot": 0, "refute": False,
+        "method": "adjustment-formula", "saved": analysis_id, "boot": 0, "refute": False,
     })
     assert res.status_code == 200
     assert res.json()["adjusted"]["value"] == pytest.approx(0.061, abs=5e-4)
@@ -70,14 +70,14 @@ def test_report_is_standalone_html(client):
     assert "corridor signal" in body
     assert "-0.207" in body and "+0.061" in body
     assert "<svg" in body and "Simpson" in body
-    assert "positivity" not in body  # {O} adjustment drops no stratum
+    assert "positivity" not in body  # {O} adjustment drops no group
 
 
-def test_report_mentions_dropped_strata_for_pi_o(client):
+def test_report_mentions_dropped_rows_for_pi_o(client):
     variant = (ROOT / "examples/hrisim_pipe.dag").read_text(encoding="utf-8")
     res = client.post("/api/analyses", data={
         "name": "overlap check", "dag": variant, "treatment": "A", "outcome": "T",
-        "method": "stratification", "example": "hrisim", "boot": 0,
+        "method": "adjustment-formula", "example": "hrisim", "boot": 0,
     })
     body = client.get(f"/api/analyses/{res.json()['id']}/report").text
     assert "36 of 100 rows" in body

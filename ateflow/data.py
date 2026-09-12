@@ -17,7 +17,7 @@ import re
 import pandas as pd
 
 MAX_CATEGORIES = 50
-MAX_STRATIFICATION_LEVELS = 10
+MAX_DISCRETE_LEVELS = 10
 MIN_ARM = 2  # below this there is nothing to compare
 FEW_ARM = 10  # below this the estimate is fragile
 
@@ -123,7 +123,7 @@ def column_kind(series: pd.Series) -> str:
         if (pd.api.types.is_integer_dtype(values) and unique == len(values)
                 and len(values) > 20 and values.is_monotonic_increasing):
             return "identifier"
-        return "discrete" if unique <= MAX_STRATIFICATION_LEVELS else "continuous"
+        return "discrete" if unique <= MAX_DISCRETE_LEVELS else "continuous"
     if len(values) > 20 and unique > 0.9 * len(values):
         return "identifier"
     return "categorical" if unique <= MAX_CATEGORIES else "text"
@@ -262,9 +262,9 @@ def prepare(
             )
         if kind == "constant":
             warnings.append(f"{c!r} never varies in the rows used: adjusting for it changes nothing")
-        if method == "stratification" and kind == "continuous":
+        if method == "adjustment-formula" and kind == "continuous":
             raise DataError(
-                f"stratification needs discrete confounders, and {c!r} has "
+                f"the adjustment formula needs discrete confounders, and {c!r} has "
                 f"{work[c].nunique()} distinct values. Use g-computation, IPW or AIPW, "
                 "or bin it into a few groups"
             )

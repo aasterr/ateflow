@@ -54,7 +54,7 @@ def test_guide_edits_produce_the_quoted_numbers():
         for tip in spec["guide"]["tries"]:
             res = client.post("/api/estimate", data={
                 "dag": _apply_edit(dag, tip["edit"]), "treatment": spec["treatment"],
-                "outcome": spec["outcome"], "method": "stratification",
+                "outcome": spec["outcome"], "method": "adjustment-formula",
                 "example": name, "boot": 0, "refute": False,
             })
             assert res.status_code == 200, (name, tip["edit"], res.text)
@@ -82,7 +82,7 @@ def test_dag_check_rejects_cycles():
 def test_estimate_on_bundled_example_matches_thesis():
     res = client.post("/api/estimate", data={
         "dag": HRISIM_DAG, "treatment": "A", "outcome": "T",
-        "method": "stratification", "example": "hrisim", "boot": 0, "refute": False,
+        "method": "adjustment-formula", "example": "hrisim", "boot": 0, "refute": False,
     })
     assert res.status_code == 200
     body = res.json()
@@ -97,7 +97,7 @@ def test_estimate_on_uploaded_csv():
     res = client.post(
         "/api/estimate",
         data={"dag": HRISIM_DAG, "treatment": "A", "outcome": "T",
-              "method": "stratification", "boot": 0, "refute": False},
+              "method": "adjustment-formula", "boot": 0, "refute": False},
         files={"file": ("episodes.csv", csv, "text/csv")},
     )
     assert res.status_code == 200
@@ -132,7 +132,7 @@ def test_messy_upload_round_trip(tmp_path, monkeypatch):
 
     dag = "piano -> email ricevuta\npiano -> stato 30gg\nemail ricevuta -> stato 30gg"
     form = {"dag": dag, "treatment": "email ricevuta", "outcome": "stato 30gg",
-            "method": "stratification", "boot": 0, "refute": False}
+            "method": "adjustment-formula", "boot": 0, "refute": False}
     missing_choice = client.post("/api/estimate", data=form,
                                  files={"file": ("clienti.csv", csv, "text/csv")})
     assert missing_choice.status_code == 422

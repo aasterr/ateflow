@@ -112,10 +112,10 @@ def render_report(analysis: dict) -> str:
         f"Confounding moves the naive estimate by "
         f"<strong>{result['confounding_bias']:+.3f}</strong> relative to the adjusted one."
     )
-    dropped = adjusted["diagnostics"].get("dropped_strata", 0)
+    dropped = adjusted["diagnostics"].get("dropped_rows", 0)
     if dropped:
         interpretation.append(
-            f"<strong>{dropped} of {adjusted['n']} rows</strong> lie in strata where the "
+            f"<strong>{dropped} of {adjusted['n']} rows</strong> lie in groups of confounder values where the "
             "treatment never varies (positivity violation); they were excluded, not imputed."
         )
     data_report = result.get("data_report")  # absent in analyses saved before it existed
