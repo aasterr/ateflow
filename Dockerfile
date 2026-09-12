@@ -16,9 +16,11 @@ RUN pip install --no-cache-dir ".[server]" \
     && python examples/make_data.py
 COPY --from=frontend /build/ateflow/static ateflow/static
 
-# Saved analyses live here: mount a volume to keep them across deploys.
+# Saved analyses live here: mount a volume to keep them across deploys
+# (without one the directory is ephemeral and saves last until the next restart).
 ENV ATEFLOW_DB=/data/ateflow.db
 VOLUME /data
 
+# Some platforms (Render) inject the port to listen on via $PORT.
 EXPOSE 8080
-CMD ["uvicorn", "ateflow.server:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD uvicorn ateflow.server:app --host 0.0.0.0 --port ${PORT:-8080}

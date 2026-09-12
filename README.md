@@ -99,7 +99,12 @@ docker build -t ateflow .
 docker run -p 8080:8080 -v ateflow_data:/data ateflow
 ```
 
-`fly.toml` is included for Fly.io — see the comments at its top.
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/aasterr/ateflow)
+
+`render.yaml` deploys the demo to Render's free tier (the instance sleeps
+when idle and its disk is ephemeral). `fly.toml` is included for Fly.io,
+where a mounted volume makes saved analyses persistent — see the comments
+at its top.
 
 ## What it does today
 

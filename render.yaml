@@ -1,0 +1,10 @@
+# Render Blueprint: free-tier deploy of the whole app from the Dockerfile.
+# The free instance sleeps after 15 idle minutes and its disk is ephemeral,
+# so saved analyses last until the next restart — fine for a demo.
+services:
+  - type: web
+    name: ateflow
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/examples
+    autoDeploy: true
