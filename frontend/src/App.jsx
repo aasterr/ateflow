@@ -216,6 +216,27 @@ const EDGE_OPTS = {
 
 const edgeId = (s, d) => `${s}->${d}`;
 
+/* Guide edits from /api/examples: {op: 'add' | 'remove' | 'flip', edge: [src, dst]}. */
+function applyGuideEdit(edges, { op, edge: [s, d] }) {
+  const rest = edges.filter(
+    (e) => !(e.source === s && e.target === d) && !(e.source === d && e.target === s)
+  );
+  if (op === "remove") return rest;
+  const [from, to] = op === "flip" ? [d, s] : [s, d];
+  return [...rest, { id: edgeId(from, to), source: from, target: to, ...EDGE_OPTS }];
+}
+
+function guideEditApplied(edges, { op, edge: [s, d] }) {
+  const has = (a, b) => edges.some((e) => e.source === a && e.target === b);
+  if (op === "add") return has(s, d);
+  if (op === "flip") return has(d, s) && !has(s, d);
+  return !has(s, d) && !has(d, s);
+}
+
+/* Identity of a question, to tell whether a shown result still matches the canvas. */
+const questionKey = (pairs, treatment, outcome, method) =>
+  [pairs.map(([s, d]) => `${s}->${d}`).sort().join(","), treatment, outcome, method].join("|");
+
 /* ---------- app ---------- */
 
 export default function App() {
@@ -229,6 +250,8 @@ export default function App() {
   const [method, setMethod] = useState("stratification");
   const [check, setCheck] = useState(null); // {minimal, error}
   const [result, setResult] = useState(null);
+  const [resultKey, setResultKey] = useState("");
+  const [guideOpen, setGuideOpen] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [savedList, setSavedList] = useState([]);
@@ -247,6 +270,11 @@ export default function App() {
 
   const columnNames = useMemo(() => nodes.map((n) => n.id), [nodes]);
   const dagText = useMemo(() => edgesToDagText(nodes, edges), [nodes, edges]);
+  const currentKey = questionKey(
+    edges.map((e) => [e.source, e.target]), treatment, outcome, method
+  );
+  const stale = result && resultKey !== currentKey;
+  const guide = source?.kind === "example" ? examples[source.name]?.guide : null;
 
   const roleOf = useCallback(
     (name) => {
@@ -369,7 +397,10 @@ export default function App() {
       const res = await fetch("/api/estimate", { method: "POST", body: questionForm() });
       const body = await res.json();
       if (!res.ok) setError(body.detail ?? "estimation failed");
-      else setResult(body);
+      else {
+        setResult(body);
+        setResultKey(currentKey);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -403,6 +434,7 @@ export default function App() {
     setMethod(a.method);
     setSource({ kind: "saved", id: a.id, name: a.name });
     setResult(a.result);
+    setResultKey(questionKey(parseDagText(a.dag), a.treatment, a.outcome, a.method));
     setError("");
   };
 
@@ -497,8 +529,13 @@ export default function App() {
         {error && <p className="hint bad">{error}</p>}
 
         {result && (
-          <section className="results">
+          <section className={stale ? "results stale" : "results"}>
             <h2>3 · Result</h2>
+            {stale && (
+              <p className="hint bad">
+                The question changed since this estimate — press Estimate ATE again.
+              </p>
+            )}
             <div className="ates">
               <div className="ate naive">
                 <span className="label">naive</span>
@@ -606,6 +643,46 @@ export default function App() {
           <div className="empty">Load an example or upload a CSV to start drawing the DAG.</div>
         )}
       </main>
+
+      {guide && (
+        guideOpen ? (
+          <aside className="guide">
+            <div className="guide-head">
+              <span className="eyebrow">About this example</span>
+              <button className="link" title="hide" onClick={() => setGuideOpen(false)}>hide</button>
+            </div>
+            <h2>{guide.title}</h2>
+            <p>{guide.story}</p>
+            <h3>Why naive and adjusted differ</h3>
+            <p>{guide.why}</p>
+            <h3>Try changing the DAG</h3>
+            <ul>
+              {guide.tries.map((tip) => {
+                const applied = guideEditApplied(edges, tip.edit);
+                return (
+                  <li key={tip.edit.op + tip.edit.edge.join()}>
+                    <p>{tip.text}</p>
+                    <button
+                      className={applied ? "chip small applied" : "chip small"}
+                      disabled={applied}
+                      onClick={() => setEdges((es) => applyGuideEdit(es, tip.edit))}
+                    >
+                      {applied ? "applied — now estimate" : "apply to the DAG"}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            <button className="link" onClick={() => loadExample(source.name)}>
+              ↺ reset to the original DAG
+            </button>
+          </aside>
+        ) : (
+          <button className="guide-tab" onClick={() => setGuideOpen(true)}>
+            About this example
+          </button>
+        )
+      )}
     </div>
   );
 }

@@ -20,7 +20,7 @@ body {
   font-size: 14px;
 }
 
-.app { display: flex; height: 100%; }
+.app { display: flex; height: 100%; position: relative; }
 
 /* ---------- sidebar ---------- */
 
@@ -92,9 +92,70 @@ select {
 .ok { color: var(--green); }
 .bad { color: var(--red); }
 
+/* ---------- example guide ---------- */
+
+.guide {
+  width: 300px;
+  min-width: 300px;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  padding: 20px 18px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.guide-head { display: flex; justify-content: space-between; align-items: baseline; }
+.guide-head .link { margin: 0; color: var(--muted); }
+.eyebrow {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--muted);
+}
+.guide h2 { margin: 6px 0 0; font-size: 16px; line-height: 1.3; }
+.guide p { margin: 6px 0 0; color: #3d3d3d; }
+.guide h3 {
+  margin: 16px 0 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--muted);
+}
+.guide ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.guide li { padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.guide li:last-child { border-bottom: 0; }
+.chip.small { margin-top: 5px; padding: 2px 10px; font-size: 12px; background: #fff; }
+.chip.applied { border-color: var(--green); color: var(--green); cursor: default; }
+.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-top: 6px;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+.link:hover { text-decoration: underline; }
+
+.guide-tab {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.guide-tab:hover { border-color: var(--accent); }
+
 /* ---------- results ---------- */
 
 .results { border-top: 1px solid var(--line); padding-top: 14px; }
+.results.stale .ates, .results.stale dl { opacity: 0.45; }
 
 .ates { display: flex; align-items: center; gap: 10px; }
 .ate { display: flex; flex-direction: column; }
@@ -138,6 +199,7 @@ dl dd { margin: 0 0 4px 0; text-align: right; font-variant-numeric: tabular-nums
   border-bottom: 1px solid var(--line);
 }
 .saved .link {
+  margin: 0;
   background: none;
   border: 0;
   padding: 0;

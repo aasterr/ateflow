@@ -24,6 +24,12 @@ from .graph import DAG
 from .report import render_report
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
+
+# Each example carries a short guide for the demo: the question, why the naive
+# and adjusted answers differ, and DAG edits worth trying. The numbers quoted
+# are stratification estimates on the bundled data (the UI default method);
+# tests/test_server.py applies every `edit` and checks the result against `expect`,
+# so the texts cannot drift away from what the demo actually shows.
 EXAMPLES = {
     "corridor": {
         "data": "corridor.csv",
@@ -31,6 +37,30 @@ EXAMPLES = {
         "treatment": "led",
         "outcome": "speed",
         "description": "Synthetic corridor scenario with a Simpson's paradox (true ATE +0.15).",
+        "guide": {
+            "title": "Does a robot's LED make people walk faster?",
+            "story": "A robot in a corridor can switch on an LED signal. The data are "
+                     "synthetic, so the true answer is known: +0.15 in walking speed.",
+            "why": "The robot turns the LED on mostly when the corridor is crowded, and "
+                   "people walk slowly in a crowd anyway. Compared as they are, LED "
+                   "episodes look slower (−0.13). Adjusting for crowding compares "
+                   "like with like and recovers +0.15.",
+            "tries": [
+                {
+                    "text": "Remove crowding → led. Nothing seems to confound the LED "
+                            "any more, the adjustment set is empty and the estimate "
+                            "falls back to the biased −0.13.",
+                    "edit": {"op": "remove", "edge": ["crowding", "led"]}, "expect": -0.130,
+                },
+                {
+                    "text": "Flip crowding → led. Crowding becomes a consequence of the "
+                            "LED, adjusting for it is no longer allowed, and ateflow "
+                            "reports −0.13 again: the DAG is an assumption, and the "
+                            "answer is only as good as it.",
+                    "edit": {"op": "flip", "edge": ["crowding", "led"]}, "expect": -0.130,
+                },
+            ],
+        },
     },
     "onboarding": {
         "data": "onboarding.csv",
@@ -39,6 +69,36 @@ EXAMPLES = {
         "outcome": "retained_30d",
         "description": "Synthetic product analytics: does a targeted onboarding email "
                        "raise 30-day retention? (true ATE +0.09)",
+        "guide": {
+            "title": "Did the onboarding email raise retention?",
+            "story": "Synthetic signups of a subscription product. Some received an "
+                     "onboarding email; the outcome is whether they are still active "
+                     "after 30 days. True effect: +9 retention points.",
+            "why": "The growth team emailed mostly free-plan users who arrived from paid "
+                   "ads, the ones most likely to churn. The emailed group retains worse "
+                   "(−6.9 points) because of who they are, not because of the email. "
+                   "Adjusting for plan and channel gives about +9. First-week activity is "
+                   "a mediator, so it stays out of the adjustment.",
+            "tries": [
+                {
+                    "text": "Remove plan → onboarding_email. Adjusting for channel alone "
+                            "leaves most of the bias in: −0.02.",
+                    "edit": {"op": "remove", "edge": ["plan", "onboarding_email"]}, "expect": -0.021,
+                },
+                {
+                    "text": "Remove channel → onboarding_email. Adjusting for plan alone "
+                            "gives +0.02, still far from +0.09.",
+                    "edit": {"op": "remove", "edge": ["channel", "onboarding_email"]}, "expect": 0.023,
+                },
+                {
+                    "text": "Flip onboarding_email → active_week1. Activity now looks like "
+                            "a cause of the email, enters the adjustment set, and the "
+                            "estimate drops to +0.035: the part of the effect that works "
+                            "by bringing users back is thrown away.",
+                    "edit": {"op": "flip", "edge": ["onboarding_email", "active_week1"]}, "expect": 0.035,
+                },
+            ],
+        },
     },
     "hrisim": {
         "data": "episodes_100_v1.csv",
@@ -46,6 +106,29 @@ EXAMPLES = {
         "treatment": "A",
         "outcome": "T",
         "description": "100 real HRI episodes from the PeopleFlow dataset (thesis numbers).",
+        "guide": {
+            "title": "Does the robot's signal help it succeed? (real data)",
+            "story": "100 real episodes of a robot crossing a corridor with people. A: the "
+                     "robot emits an LED signal. T: the task succeeds instead of timing "
+                     "out. O: static obstacles. The numbers match the reference thesis.",
+            "why": "Obstacles change both whether the robot signals and how likely the task "
+                   "is to succeed. Compared as they are, signalling episodes succeed less "
+                   "(−0.207). Adjusting for O reverses the sign: +0.061.",
+            "tries": [
+                {
+                    "text": "Add Pi → Pe. Pi becomes a confounder too, the set grows to "
+                            "{O, Pi} and the estimate rises to +0.108, but 36 of the 100 "
+                            "episodes are dropped: with Pi=0 and O=0 the robot never "
+                            "signalled, so there is nothing to compare.",
+                    "edit": {"op": "add", "edge": ["Pi", "Pe"]}, "expect": 0.108,
+                },
+                {
+                    "text": "Remove O → A. With no confounder declared, the answer is the "
+                            "naive −0.207.",
+                    "edit": {"op": "remove", "edge": ["O", "A"]}, "expect": -0.207,
+                },
+            ],
+        },
     },
 }
 
@@ -244,6 +327,7 @@ def list_examples() -> dict:
             "dag": (EXAMPLES_DIR / spec["dag"]).read_text(encoding="utf-8"),
             "treatment": spec["treatment"],
             "outcome": spec["outcome"],
+            "guide": spec.get("guide"),
         }
     return out
 

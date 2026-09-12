@@ -28,6 +28,40 @@ def test_examples_are_listed():
     assert "->" in body["hrisim"]["dag"]
 
 
+def _apply_edit(dag_text: str, edit: dict) -> str:
+    """Mirror of the frontend's guide edits, on the DAG text."""
+    src, dst = edit["edge"]
+    edges = [(s.strip(), d.strip()) for s, d in
+             (pair for line in dag_text.splitlines()
+              for chain in [line.split("#")[0].split("->")]
+              for pair in zip(chain, chain[1:]))]
+    if edit["op"] == "add":
+        assert (src, dst) not in edges, f"{src} -> {dst} already in the DAG"
+        edges.append((src, dst))
+    else:
+        assert (src, dst) in edges, f"{src} -> {dst} not in the DAG"
+        edges.remove((src, dst))
+        if edit["op"] == "flip":
+            edges.append((dst, src))
+    return "\n".join(f"{s} -> {d}" for s, d in edges)
+
+
+def test_guide_edits_produce_the_quoted_numbers():
+    from ateflow.server import EXAMPLES
+
+    for name, spec in EXAMPLES.items():
+        dag = (ROOT / "examples" / spec["dag"]).read_text(encoding="utf-8")
+        for tip in spec["guide"]["tries"]:
+            res = client.post("/api/estimate", data={
+                "dag": _apply_edit(dag, tip["edit"]), "treatment": spec["treatment"],
+                "outcome": spec["outcome"], "method": "stratification",
+                "example": name, "boot": 0, "refute": False,
+            })
+            assert res.status_code == 200, (name, tip["edit"], res.text)
+            assert res.json()["adjusted"]["value"] == pytest.approx(tip["expect"], abs=5e-3), (
+                name, tip["edit"])
+
+
 def test_dag_check_identifies_minimal_set():
     res = client.post("/api/dag/check", json={
         "dag": HRISIM_DAG, "treatment": "A", "outcome": "T",
