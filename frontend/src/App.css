@@ -152,6 +152,39 @@ select {
 }
 .guide-tab:hover { border-color: var(--accent); }
 
+/* ---------- data check ---------- */
+
+.warn { color: var(--amber); font-size: 12.5px; margin: 6px 0 0; }
+label.sub { margin-left: 14px; font-size: 13px; }
+label.sub select { max-width: 170px; }
+
+.data-check table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+.data-check td { padding: 6px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+.data-check tr.off .col-name { color: var(--muted); }
+.col-name { font-weight: 600; word-break: break-word; }
+.col-examples {
+  color: var(--muted);
+  font-size: 11.5px;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kind {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #eef0fb;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.kind.kind-out { background: #f1f1ee; color: var(--muted); }
+.col-missing { color: var(--amber); font-size: 11.5px; margin-top: 2px; }
+
+.data-report { margin-top: 10px; font-size: 12.5px; color: var(--muted); }
+.data-report p { margin: 2px 0 0; }
+
 /* ---------- results ---------- */
 
 .results { border-top: 1px solid var(--line); padding-top: 14px; }

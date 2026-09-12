@@ -48,6 +48,13 @@ const CLEARANCE = 42;
 
 function layout(names, pairs) {
   pairs = pairs.filter(([s, d]) => names.includes(s) && names.includes(d));
+  if (pairs.length === 0) {
+    // a fresh upload: a loose grid to draw on, not one tall column
+    const cols = Math.ceil(Math.sqrt(names.length));
+    return Object.fromEntries(
+      names.map((n, i) => [n, { x: (i % cols) * LAYER_GAP, y: Math.floor(i / cols) * ROW_GAP * 1.4 }])
+    );
+  }
   const depth = Object.fromEntries(names.map((n) => [n, 0]));
   for (let pass = 0; pass < names.length; pass++) {
     let changed = false;
@@ -234,8 +241,39 @@ function guideEditApplied(edges, { op, edge: [s, d] }) {
 }
 
 /* Identity of a question, to tell whether a shown result still matches the canvas. */
-const questionKey = (pairs, treatment, outcome, method) =>
-  [pairs.map(([s, d]) => `${s}->${d}`).sort().join(","), treatment, outcome, method].join("|");
+const questionKey = (pairs, ...rest) =>
+  [pairs.map(([s, d]) => `${s}->${d}`).sort().join(","), ...rest].join("|");
+
+/* ---------- data check helpers (mirror ateflow/data.py) ---------- */
+
+const KIND_NOTE = {
+  binary: "two values",
+  discrete: "few numeric values",
+  continuous: "numeric",
+  categorical: "categories",
+  identifier: "looks like an ID",
+  text: "free text",
+  constant: "never varies",
+  empty: "all missing",
+};
+const LEFT_OUT = new Set(["identifier", "text", "constant", "empty"]);
+const usableColumns = (profile) => profile.filter((p) => !LEFT_OUT.has(p.kind)).map((p) => p.name);
+
+const TRUE_TOKENS = new Set(["1", "true", "yes", "y", "si", "sì", "treated", "treatment", "on"]);
+const FALSE_TOKENS = new Set(["0", "false", "no", "n", "control", "untreated", "off"]);
+const token = (v) => {
+  const s = String(v).trim().toLowerCase();
+  return s === "1.0" ? "1" : s === "0.0" ? "0" : s;
+};
+
+/* For a two-valued column: which value the server will read as 1 on its own, or null. */
+function autoPositive(values) {
+  const tokens = values.map(token);
+  if (!tokens.every((t) => TRUE_TOKENS.has(t) || FALSE_TOKENS.has(t))) return null;
+  const positives = values.filter((v) => TRUE_TOKENS.has(token(v)));
+  return positives.length === 1 ? positives[0] : null;
+}
+const isZeroOne = (values) => values.map(token).sort().join() === "0,1";
 
 /* ---------- app ---------- */
 
@@ -252,6 +290,10 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [resultKey, setResultKey] = useState("");
   const [guideOpen, setGuideOpen] = useState(true);
+  const [profile, setProfile] = useState([]); // one entry per CSV column, from the server
+  const [dataInfo, setDataInfo] = useState(null); // what was detected reading an upload
+  const [treatedValue, setTreatedValue] = useState("");
+  const [outcomePositive, setOutcomePositive] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [savedList, setSavedList] = useState([]);
@@ -271,8 +313,44 @@ export default function App() {
   const columnNames = useMemo(() => nodes.map((n) => n.id), [nodes]);
   const dagText = useMemo(() => edgesToDagText(nodes, edges), [nodes, edges]);
   const currentKey = questionKey(
-    edges.map((e) => [e.source, e.target]), treatment, outcome, method
+    edges.map((e) => [e.source, e.target]), treatment, outcome, method, treatedValue, outcomePositive
   );
+  const profileOf = (name) => profile.find((p) => p.name === name);
+
+  /* What the question panel must say about the chosen treatment and outcome
+     before anything is sent: wrong kind of column, or a coding to choose. */
+  const treatmentInfo = useMemo(() => {
+    const p = profile.find((c) => c.name === treatment);
+    if (!p) return null;
+    if (p.kind !== "binary") {
+      return { error: `${treatment} has ${p.unique} distinct values: the treatment must have exactly two` };
+    }
+    return isZeroOne(p.examples) ? { values: null } : { values: p.examples };
+  }, [profile, treatment]);
+
+  const outcomeInfo = useMemo(() => {
+    const p = profile.find((c) => c.name === outcome);
+    if (!p) return null;
+    if (p.kind === "binary" && !isZeroOne(p.examples) && !p.numeric) return { values: p.examples };
+    if (!p.numeric && p.kind !== "binary") {
+      return { error: `${outcome} is not numeric (e.g. "${p.examples[0]}"): the outcome must be a number or have two values` };
+    }
+    if (p.kind === "constant" || p.kind === "empty") return { error: `${outcome} never varies` };
+    return { values: null };
+  }, [profile, outcome]);
+
+  const chooseTreatment = (name) => {
+    setTreatment(name);
+    const p = profile.find((c) => c.name === name);
+    setTreatedValue(p?.kind === "binary" && !isZeroOne(p.examples) ? autoPositive(p.examples) ?? "" : "");
+  };
+  const chooseOutcome = (name) => {
+    setOutcome(name);
+    const p = profile.find((c) => c.name === name);
+    setOutcomePositive(
+      p?.kind === "binary" && !p.numeric && !isZeroOne(p.examples) ? autoPositive(p.examples) ?? "" : ""
+    );
+  };
   const stale = result && resultKey !== currentKey;
   const guide = source?.kind === "example" ? examples[source.name]?.guide : null;
 
@@ -313,9 +391,13 @@ export default function App() {
   const loadExample = (name) => {
     const ex = examples[name];
     if (!ex) return;
-    buildGraph(ex.columns.filter((c) => c !== "episode_id"), parseDagText(ex.dag));
+    buildGraph(usableColumns(ex.profile), parseDagText(ex.dag));
+    setProfile(ex.profile);
+    setDataInfo(null);
     setTreatment(ex.treatment);
     setOutcome(ex.outcome);
+    setTreatedValue("");
+    setOutcomePositive("");
     setSource({ kind: "example", name });
     setResult(null);
     setError("");
@@ -331,9 +413,13 @@ export default function App() {
       setError(body.detail ?? "upload failed");
       return;
     }
-    buildGraph(body.columns.filter((c) => c !== "episode_id"), []);
+    buildGraph(usableColumns(body.profile), []);
+    setProfile(body.profile);
+    setDataInfo(body.info);
     setTreatment("");
     setOutcome("");
+    setTreatedValue("");
+    setOutcomePositive("");
     setSource({ kind: "file", file, rows: body.rows });
     setResult(null);
     setError("");
@@ -383,6 +469,8 @@ export default function App() {
     form.append("outcome", outcome);
     form.append("method", method);
     form.append("boot", "500");
+    if (treatedValue) form.append("treated_value", treatedValue);
+    if (outcomePositive) form.append("outcome_positive", outcomePositive);
     if (source.kind === "file") form.append("file", source.file);
     else if (source.kind === "saved") form.append("saved", source.id);
     else form.append("example", source.name);
@@ -428,13 +516,22 @@ export default function App() {
     const res = await fetch(`/api/analyses/${id}`);
     if (!res.ok) return;
     const a = await res.json();
-    buildGraph(a.columns.filter((c) => c !== "episode_id"), parseDagText(a.dag));
+    buildGraph(usableColumns(a.profile), parseDagText(a.dag));
+    setProfile(a.profile);
+    setDataInfo(null);
     setTreatment(a.treatment);
     setOutcome(a.outcome);
     setMethod(a.method);
+    // the coding chosen when it was saved travels in the stored result
+    const rep = a.result.data_report;
+    const tv = rep && !isZeroOne(Object.values(rep.treatment_coding)) ? rep.treatment_coding["1"] : "";
+    const op = rep?.outcome_coding && !isZeroOne(Object.values(rep.outcome_coding))
+      ? rep.outcome_coding["1"] : "";
+    setTreatedValue(tv);
+    setOutcomePositive(op);
     setSource({ kind: "saved", id: a.id, name: a.name });
     setResult(a.result);
-    setResultKey(questionKey(parseDagText(a.dag), a.treatment, a.outcome, a.method));
+    setResultKey(questionKey(parseDagText(a.dag), a.treatment, a.outcome, a.method, tv, op));
     setError("");
   };
 
@@ -445,7 +542,19 @@ export default function App() {
   };
 
   const ready =
-    source && treatment && outcome && treatment !== outcome && edges.length > 0 && !check?.error;
+    source && treatment && outcome && treatment !== outcome && edges.length > 0 && !check?.error &&
+    !treatmentInfo?.error && !outcomeInfo?.error &&
+    !(treatmentInfo?.values && !treatedValue) && !(outcomeInfo?.values && !outcomePositive);
+
+  /* Upload only: add or remove a column from the canvas, keeping the arrows among the rest. */
+  const toggleColumn = (name) => {
+    const names = columnNames.includes(name)
+      ? columnNames.filter((c) => c !== name)
+      : profile.map((p) => p.name).filter((c) => c === name || columnNames.includes(c));
+    buildGraph(names, edges.map((e) => [e.source, e.target]));
+    if (!names.includes(treatment)) setTreatment("");
+    if (!names.includes(outcome)) setOutcome("");
+  };
 
   return (
     <div className="app">
@@ -480,7 +589,9 @@ export default function App() {
             />
           </div>
           {source?.kind === "file" && (
-            <p className="hint">{source.file.name} — {source.rows} rows</p>
+            <p className="hint">
+              {source.file.name} — {source.rows} rows · checked in the panel on the right
+            </p>
           )}
         </section>
 
@@ -489,18 +600,38 @@ export default function App() {
             <h2>2 · Question</h2>
             <label>
               treatment
-              <select value={treatment} onChange={(e) => setTreatment(e.target.value)}>
+              <select value={treatment} onChange={(e) => chooseTreatment(e.target.value)}>
                 <option value="">—</option>
                 {columnNames.map((c) => <option key={c}>{c}</option>)}
               </select>
             </label>
+            {treatmentInfo?.error && <p className="hint bad">{treatmentInfo.error}</p>}
+            {treatmentInfo?.values && (
+              <label className="sub">
+                treated means
+                <select value={treatedValue} onChange={(e) => setTreatedValue(e.target.value)}>
+                  <option value="">choose…</option>
+                  {treatmentInfo.values.map((v) => <option key={v}>{v}</option>)}
+                </select>
+              </label>
+            )}
             <label>
               outcome
-              <select value={outcome} onChange={(e) => setOutcome(e.target.value)}>
+              <select value={outcome} onChange={(e) => chooseOutcome(e.target.value)}>
                 <option value="">—</option>
                 {columnNames.map((c) => <option key={c}>{c}</option>)}
               </select>
             </label>
+            {outcomeInfo?.error && <p className="hint bad">{outcomeInfo.error}</p>}
+            {outcomeInfo?.values && (
+              <label className="sub">
+                counts as 1
+                <select value={outcomePositive} onChange={(e) => setOutcomePositive(e.target.value)}>
+                  <option value="">choose…</option>
+                  {outcomeInfo.values.map((v) => <option key={v}>{v}</option>)}
+                </select>
+              </label>
+            )}
             <label>
               method
               <select value={method} onChange={(e) => setMethod(e.target.value)}>
@@ -556,6 +687,24 @@ export default function App() {
             </div>
             {result.sign_flip && (
               <p className="badge">Simpson's paradox: adjustment flips the sign</p>
+            )}
+            {result.data_report && (
+              <div className="data-report">
+                <p>
+                  {result.data_report.rows_used} of {result.data_report.rows_in} rows used ·{" "}
+                  {result.data_report.treated} treated, {result.data_report.control} control
+                  {!isZeroOne(Object.values(result.data_report.treatment_coding)) && (
+                    <> · treated = “{result.data_report.treatment_coding["1"]}”</>
+                  )}
+                  {result.data_report.outcome_coding &&
+                    !isZeroOne(Object.values(result.data_report.outcome_coding)) && (
+                      <> · outcome 1 = “{result.data_report.outcome_coding["1"]}”</>
+                    )}
+                </p>
+                {result.data_report.warnings.map((w) => (
+                  <p key={w} className="warn">⚠ {w}</p>
+                ))}
+              </div>
             )}
             <dl>
               <dt>confounding bias</dt>
@@ -661,6 +810,71 @@ export default function App() {
           <div className="empty">Load an example or upload a CSV to start drawing the DAG.</div>
         )}
       </main>
+
+      {source?.kind === "file" && profile.length > 0 && (
+        guideOpen ? (
+          <aside className="guide data-check">
+            <div className="guide-head">
+              <span className="eyebrow">Data check</span>
+              <button className="link" title="hide" onClick={() => setGuideOpen(false)}>hide</button>
+            </div>
+            <h2>{source.file.name}</h2>
+            {dataInfo && (
+              <p className="hint">
+                {dataInfo.rows} rows · {dataInfo.delimiter}-separated · decimal {dataInfo.decimal}
+                {dataInfo.encoding !== "utf-8" && <> · {dataInfo.encoding} encoding</>}
+              </p>
+            )}
+            {dataInfo && Object.keys(dataInfo.renamed).length > 0 && (
+              <p className="warn">
+                Renamed for the DAG:{" "}
+                {Object.entries(dataInfo.renamed).map(([a, b]) => `“${a}” → ${b}`).join(", ")}
+              </p>
+            )}
+            <p>
+              Tick the variables that belong in the DAG. The treatment needs exactly two
+              values; the outcome a number or two values. Rows with a missing value in the
+              variables you use are dropped, and counted in the result.
+            </p>
+            <table>
+              <tbody>
+                {profile.map((p) => {
+                  const on = columnNames.includes(p.name);
+                  return (
+                    <tr key={p.name} className={on ? "" : "off"}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          disabled={p.kind === "empty"}
+                          onChange={() => toggleColumn(p.name)}
+                          aria-label={`include ${p.name}`}
+                        />
+                      </td>
+                      <td>
+                        <div className="col-name">{p.name}</div>
+                        <div className="col-examples" title={p.examples.join(", ")}>
+                          {p.examples.join(", ")}
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`kind ${LEFT_OUT.has(p.kind) ? "kind-out" : ""}`}>
+                          {KIND_NOTE[p.kind]}
+                        </span>
+                        {p.missing > 0 && (
+                          <div className="col-missing">{p.missing} missing</div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </aside>
+        ) : (
+          <button className="guide-tab" onClick={() => setGuideOpen(true)}>Data check</button>
+        )
+      )}
 
       {guide && (
         guideOpen ? (

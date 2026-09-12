@@ -49,6 +49,17 @@ def test_d_separation_chain_and_fork():
     assert fork.d_separated("a", "c", ["b"])
 
 
+def test_names_with_spaces_are_allowed():
+    dag = DAG.parse("signup  channel -> email\nsignup channel -> retained\nemail -> retained\nnotes")
+    assert dag.minimal_backdoor_set("email", "retained") == {"signup channel"}
+    assert "notes" in dag.nodes
+
+
+def test_dangling_arrow_is_rejected():
+    with pytest.raises(ValueError, match="invalid node name"):
+        DAG.parse("a -> ")
+
+
 def test_cycle_is_rejected():
     with pytest.raises(Exception):
         DAG.parse("a -> b\nb -> a")

@@ -9,7 +9,6 @@ If `ateflow/static/` exists (the built frontend), it is served at `/`.
 
 from __future__ import annotations
 
-import io
 from pathlib import Path
 
 import pandas as pd
@@ -20,6 +19,7 @@ from pydantic import BaseModel
 
 from . import store
 from .api import Result, estimate_ate
+from .data import DataError, profile, read_csv
 from .graph import DAG
 from .report import render_report
 
@@ -154,15 +154,26 @@ def _result_payload(result: Result) -> dict:
         "refutations": result.refutations,
         "confounding_bias": result.confounding_bias,
         "sign_flip": result.sign_flip,
+        "data_report": result.data_report,
         "report": result.report(),
     }
 
 
+MAX_UPLOAD_MB = 20
+
+
 def _read_csv(raw: bytes, name: str) -> pd.DataFrame:
+    return _read_csv_with_info(raw, name)[0]
+
+
+def _read_csv_with_info(raw: bytes, name: str) -> tuple[pd.DataFrame, dict]:
+    if len(raw) > MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(
+            413, f"{name!r} is {len(raw) / 2**20:.0f} MB, the limit is {MAX_UPLOAD_MB} MB")
     try:
-        return pd.read_csv(io.BytesIO(raw))
-    except Exception as exc:
-        raise HTTPException(422, f"could not parse {name!r} as CSV: {exc}") from exc
+        return read_csv(raw)
+    except DataError as exc:
+        raise HTTPException(422, f"{name}: {exc}") from exc
 
 
 class DagCheckRequest(BaseModel):
@@ -214,7 +225,7 @@ async def _resolve_data(
         if spec is None:
             raise HTTPException(404, f"unknown example {example!r}")
         raw = (EXAMPLES_DIR / spec["data"]).read_bytes()
-        return pd.read_csv(io.BytesIO(raw)), raw, f"example: {example}"
+        return _read_csv(raw, example), raw, f"example: {example}"
     if saved is not None:
         record = store.get_analysis(saved)
         if record is None:
@@ -225,11 +236,13 @@ async def _resolve_data(
 
 
 def _run(data: pd.DataFrame, dag: str, treatment: str, outcome: str,
-         method: str, boot: int, refute: bool, seed: int) -> dict:
+         method: str, boot: int, refute: bool, seed: int,
+         treated_value: str | None = None, outcome_positive: str | None = None) -> dict:
     try:
         result = estimate_ate(
             data, dag, treatment=treatment, outcome=outcome,
             method=method, n_boot=boot, refute=refute, seed=seed,
+            treated_value=treated_value or None, outcome_positive=outcome_positive or None,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -248,10 +261,13 @@ async def estimate(
     file: UploadFile | None = File(None),
     example: str | None = Form(None),
     saved: int | None = Form(None),
+    treated_value: str | None = Form(None),
+    outcome_positive: str | None = Form(None),
 ) -> dict:
     """Runs the full estimate on an uploaded CSV, a bundled example, or saved data."""
     data, _, _ = await _resolve_data(file, example, saved)
-    return _run(data, dag, treatment, outcome, method, boot, refute, seed)
+    return _run(data, dag, treatment, outcome, method, boot, refute, seed,
+                treated_value, outcome_positive)
 
 
 @app.post("/api/analyses")
@@ -266,10 +282,13 @@ async def save_analysis(
     file: UploadFile | None = File(None),
     example: str | None = Form(None),
     saved: int | None = Form(None),
+    treated_value: str | None = Form(None),
+    outcome_positive: str | None = Form(None),
 ) -> dict:
     """Runs the estimate and persists everything: dataset, DAG, question, result."""
     data, raw, source = await _resolve_data(file, example, saved)
-    payload = _run(data, dag, treatment, outcome, method, boot, True, seed)
+    payload = _run(data, dag, treatment, outcome, method, boot, True, seed,
+                   treated_value, outcome_positive)
     analysis_id = store.save_analysis(
         name=name.strip() or "untitled",
         source=source,
@@ -296,6 +315,7 @@ def analysis(analysis_id: int) -> dict:
     data = _read_csv(saved["csv"], saved["name"])
     saved.pop("csv")
     saved["columns"] = list(data.columns)
+    saved["profile"] = profile(data)
     return saved
 
 
@@ -320,10 +340,11 @@ def list_examples() -> dict:
     """The bundled example datasets, with their DAG and default question."""
     out = {}
     for name, spec in EXAMPLES.items():
-        df = pd.read_csv(EXAMPLES_DIR / spec["data"], nrows=0)
+        df = _read_csv((EXAMPLES_DIR / spec["data"]).read_bytes(), name)
         out[name] = {
             "description": spec["description"],
             "columns": list(df.columns),
+            "profile": profile(df),
             "dag": (EXAMPLES_DIR / spec["dag"]).read_text(encoding="utf-8"),
             "treatment": spec["treatment"],
             "outcome": spec["outcome"],
@@ -334,9 +355,13 @@ def list_examples() -> dict:
 
 @app.post("/api/columns")
 async def columns(file: UploadFile = File(...)) -> dict:
-    """Column names of an uploaded CSV, without keeping the file."""
-    data = _read_csv(await file.read(), file.filename or "upload")
-    return {"columns": list(data.columns), "rows": len(data)}
+    """Reads an uploaded CSV without keeping it: columns, how each looks, what was detected.
+
+    The frontend shows this as a data check before any question is asked.
+    """
+    data, info = _read_csv_with_info(await file.read(), file.filename or "upload")
+    return {"columns": list(data.columns), "rows": len(data),
+            "profile": profile(data), "info": info}
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"

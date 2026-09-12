@@ -114,6 +114,29 @@ cd frontend && npm install && npm run build   # builds into ateflow/static
 uvicorn ateflow.server:app
 ```
 
+### Bringing your own CSV
+
+Upload the file as it comes out of your tool. ateflow detects the delimiter
+(comma, semicolon, tab, pipe), a decimal comma and Windows encodings, so an
+Excel export with Italian locale reads as-is. A data check then shows every
+column with what it looks like — two values, categories, numeric, an ID,
+free text, all missing — and leaves IDs and empty columns out of the DAG.
+
+When a question is asked:
+
+- the treatment must have exactly two values. `0/1`, `true/false`,
+  `yes/no`, `sì/no`, `treated/control` are coded automatically; for any other
+  pair (`1/2`, `A/B`) you choose which one is the treatment
+- the outcome must be numeric or have two values (you choose which counts as 1)
+- rows with a missing value in the variables the question uses are dropped;
+  how many, and because of which column, is reported with the result
+- an ID or free-text column cannot be adjusted for, and stratification refuses
+  continuous confounders — the error says what to do instead
+
+The same checks run from the CLI (`--treated-value`, `--outcome-positive`)
+and from Python, where `Result.data_report` holds the details. Uploads are
+limited to 20 MB.
+
 For development, run the API and `npm run dev` side by side: Vite proxies
 `/api` to port 8000. The API alone (no built frontend) exposes
 `/api/estimate`, `/api/dag/check`, `/api/columns`, `/api/examples` — docs at

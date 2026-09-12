@@ -5,9 +5,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-import pandas as pd
-
 from .api import estimate_ate
+from .data import read_csv
 from .graph import DAG
 
 
@@ -24,14 +23,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--boot", type=int, default=500, help="bootstrap resamples, 0 to skip")
     p.add_argument("--no-refute", action="store_true")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--treated-value", default=None,
+                   help="which value of a two-valued treatment is the treatment")
+    p.add_argument("--outcome-positive", default=None,
+                   help="which value of a two-valued text outcome counts as 1")
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    data = pd.read_csv(args.data)
-    dag = DAG.from_file(args.dag)
     try:
+        with open(args.data, "rb") as fh:
+            data, _ = read_csv(fh.read())
+        dag = DAG.from_file(args.dag)
         result = estimate_ate(
             data,
             dag,
@@ -42,8 +46,10 @@ def main(argv: list[str] | None = None) -> int:
             n_boot=args.boot,
             refute=not args.no_refute,
             seed=args.seed,
+            treated_value=args.treated_value,
+            outcome_positive=args.outcome_positive,
         )
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     print(result.report())

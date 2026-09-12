@@ -58,13 +58,12 @@ class DAG:
             if not line:
                 continue
             if "->" not in line:
-                # isolated node (e.g. a disconnected variable)
-                if len(line.split()) == 1:
-                    dag.add_node(line)
-                    continue
-                raise ValueError(f"line {lineno}: expected the form 'A -> B', found {raw!r}")
-            chain = [tok.strip() for tok in line.split("->")]
-            if any(not tok or " " in tok for tok in chain):
+                # isolated node (e.g. a disconnected variable); names may contain
+                # spaces, as CSV headers often do
+                dag.add_node(" ".join(line.split()))
+                continue
+            chain = [" ".join(tok.split()) for tok in line.split("->")]
+            if any(not tok for tok in chain):
                 raise ValueError(f"line {lineno}: invalid node name in {raw!r}")
             for src, dst in zip(chain, chain[1:]):
                 dag.add_edge(src, dst)

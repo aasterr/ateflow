@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
 
+from .data import prepare
 from .estimate import (
     Estimate,
     aipw,
@@ -31,6 +32,7 @@ class Result:
     adjustment_set: list[str]
     alternatives: list[list[str]]
     refutations: list[dict]
+    data_report: dict = field(default_factory=dict)
 
     @property
     def confounding_bias(self) -> float:
@@ -43,7 +45,18 @@ class Result:
         return self.naive.value * self.adjusted.value < 0
 
     def report(self) -> str:
-        lines = [
+        lines = []
+        rep = self.data_report
+        if rep:
+            lines.append(f"rows used        : {rep['rows_used']} of {rep['rows_in']} "
+                         f"({rep['treated']} treated, {rep['control']} control)")
+            coding = rep["treatment_coding"]
+            if coding["1"] != "1":
+                lines.append(f"treated means   : {coding['1']!r} (control: {coding['0']!r})")
+            for w in rep["warnings"]:
+                lines.append(f"warning          : {w}")
+            lines.append("")
+        lines += [
             f"{self.naive}",
             f"{self.adjusted}",
             "",
@@ -72,12 +85,19 @@ def estimate_ate(
     n_boot: int = 500,
     refute: bool = True,
     seed: int = 0,
+    treated_value: str | None = None,
+    outcome_positive: str | None = None,
 ) -> Result:
     """Estimates the ATE, identifying the adjustment set from the DAG.
 
     `dag` accepts a DAG object or the text in 'A -> B' format directly.
     If `adjustment_set` is given, it is validated against the backdoor
     criterion instead of being searched for.
+
+    The data go through `data.prepare` first: incomplete rows are dropped,
+    a two-valued treatment is coded 0/1 (`treated_value` says which value is
+    the treatment when the labels do not), and unusable confounders are
+    refused. What happened is in `Result.data_report`.
     """
     graph = dag if isinstance(dag, DAG) else DAG.parse(dag)
 
@@ -108,6 +128,11 @@ def estimate_ate(
         raise ValueError(f"unknown method {method!r}, use one of {sorted(estimators)}")
     fn = estimators[method]
 
+    data, data_report = prepare(
+        data, treatment, outcome, chosen, method=method,
+        treated_value=treated_value, outcome_positive=outcome_positive,
+    )
+
     def run(frame: pd.DataFrame, extra: list[str] | None = None) -> Estimate:
         return fn(frame, treatment, outcome, chosen + list(extra or []))
 
@@ -134,4 +159,5 @@ def estimate_ate(
         adjustment_set=chosen,
         alternatives=alternatives,
         refutations=refutations,
+        data_report=data_report,
     )

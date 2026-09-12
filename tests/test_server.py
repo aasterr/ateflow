@@ -113,6 +113,51 @@ def test_estimate_maps_domain_errors_to_422():
     assert "does not appear in the DAG" in res.json()["detail"]
 
 
+def test_messy_upload_round_trip(tmp_path, monkeypatch):
+    """Excel-Italian CSV with text labels: check, estimate with a chosen coding, save, report."""
+    monkeypatch.setenv("ATEFLOW_DB", str(tmp_path / "t.db"))
+    csv = (
+        "ID cliente;piano;email ricevuta;stato 30gg;spesa\n"
+        + "".join(
+            f"C{i};{'pro' if i % 3 == 0 else 'free'};{'sì' if i % 2 else 'no'};"
+            f"{'attivo' if (i * 7) % 5 < 3 else 'perso'};{i % 11},5\n"
+            for i in range(200)
+        )
+    ).encode("cp1252")
+
+    cols = client.post("/api/columns", files={"file": ("clienti.csv", csv, "text/csv")}).json()
+    kinds = {p["name"]: p["kind"] for p in cols["profile"]}
+    assert kinds["ID cliente"] == "identifier" and kinds["email ricevuta"] == "binary"
+    assert (cols["info"]["delimiter"], cols["info"]["decimal"]) == ("semicolon", "comma")
+
+    dag = "piano -> email ricevuta\npiano -> stato 30gg\nemail ricevuta -> stato 30gg"
+    form = {"dag": dag, "treatment": "email ricevuta", "outcome": "stato 30gg",
+            "method": "stratification", "boot": 0, "refute": False}
+    missing_choice = client.post("/api/estimate", data=form,
+                                 files={"file": ("clienti.csv", csv, "text/csv")})
+    assert missing_choice.status_code == 422
+    assert "positive outcome" in missing_choice.json()["detail"]
+
+    form["outcome_positive"] = "attivo"
+    res = client.post("/api/analyses", data={**form, "name": "email"},
+                      files={"file": ("clienti.csv", csv, "text/csv")})
+    assert res.status_code == 200
+    analysis_id = res.json()["id"]
+    saved = client.get(f"/api/analyses/{analysis_id}").json()
+    rep = saved["result"]["data_report"]
+    assert rep["treatment_coding"]["1"] == "sì"
+    assert rep["outcome_coding"] == {"1": "attivo", "0": "perso"}
+    assert "treated = sì" in client.get(f"/api/analyses/{analysis_id}/report").text
+
+
+def test_oversized_upload_is_refused(monkeypatch):
+    import ateflow.server as server
+
+    monkeypatch.setattr(server, "MAX_UPLOAD_MB", 0.001)
+    res = client.post("/api/columns", files={"file": ("big.csv", b"a,b\n" + b"1,2\n" * 1000, "text/csv")})
+    assert res.status_code == 413
+
+
 def test_columns_endpoint_reads_header():
     csv = (ROOT / "examples/episodes_100_v1.csv").read_bytes()
     res = client.post("/api/columns", files={"file": ("e.csv", csv, "text/csv")})

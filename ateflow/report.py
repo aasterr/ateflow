@@ -118,6 +118,16 @@ def render_report(analysis: dict) -> str:
             f"<strong>{dropped} of {adjusted['n']} rows</strong> lie in strata where the "
             "treatment never varies (positivity violation); they were excluded, not imputed."
         )
+    data_report = result.get("data_report")  # absent in analyses saved before it existed
+    if data_report:
+        coding = data_report["treatment_coding"]
+        treated = "" if coding["1"] in ("1", "1.0") else f" (treated = {e(coding['1'])!s})"
+        interpretation.append(
+            f"The estimate uses <strong>{data_report['rows_used']} of "
+            f"{data_report['rows_in']} rows</strong>: {data_report['treated']} treated and "
+            f"{data_report['control']} control{treated}."
+        )
+        interpretation.extend(f"Data warning: {e(w)}." for w in data_report["warnings"])
     clipped = adjusted["diagnostics"].get("clipped", 0)
     if clipped:
         interpretation.append(
