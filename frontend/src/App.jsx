@@ -2,13 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
+  BaseEdge,
   Controls,
+  EdgeLabelRenderer,
   Handle,
   MarkerType,
   Position,
-  addEdge,
   applyEdgeChanges,
   applyNodeChanges,
+  getStraightPath,
+  useConnection,
+  useInternalNode,
+  useReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -34,13 +39,19 @@ function edgesToDagText(nodes, edges) {
   return lines.join("\n");
 }
 
-/* Layered layout: x by longest path from a root, y by order within the layer. */
+/* Layered layout. Straight edges make two things matter: nodes of a layer are
+   ordered by their parents' height (fewer crossings), and an edge that skips
+   layers must not run through the nodes it skips, so those get pushed aside. */
+const LAYER_GAP = 230;
+const ROW_GAP = 90;
+const CLEARANCE = 42;
+
 function layout(names, pairs) {
+  pairs = pairs.filter(([s, d]) => names.includes(s) && names.includes(d));
   const depth = Object.fromEntries(names.map((n) => [n, 0]));
   for (let pass = 0; pass < names.length; pass++) {
     let changed = false;
     for (const [src, dst] of pairs) {
-      if (depth[src] === undefined || depth[dst] === undefined) continue;
       if (depth[dst] < depth[src] + 1) {
         depth[dst] = depth[src] + 1;
         changed = true;
@@ -48,33 +59,162 @@ function layout(names, pairs) {
     }
     if (!changed) break;
   }
-  const perLayer = {};
+
+  const layers = [];
+  for (const n of names) (layers[depth[n]] ??= []).push(n);
+  const y = {};
+  layers.forEach((layer, d) => {
+    if (d > 0) {
+      const bary = (n) => {
+        const ys = pairs.filter(([, dst]) => dst === n).map(([s]) => y[s]);
+        return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : 0;
+      };
+      layer.sort((a, b) => bary(a) - bary(b));
+    }
+    layer.forEach((n, i) => (y[n] = (i - (layer.length - 1) / 2) * ROW_GAP * 1.4));
+  });
+
+  for (let iter = 0; iter < 30; iter++) {
+    let moved = false;
+    for (const [s, d] of pairs) {
+      for (let k = depth[s] + 1; k < depth[d]; k++) {
+        for (const n of layers[k]) {
+          const lineY = y[s] + ((y[d] - y[s]) * (k - depth[s])) / (depth[d] - depth[s]);
+          const off = y[n] - lineY;
+          if (Math.abs(off) < CLEARANCE) {
+            y[n] = lineY + (off >= 0 ? CLEARANCE : -CLEARANCE);
+            moved = true;
+          }
+        }
+      }
+    }
+    for (const layer of layers) {
+      const sorted = [...layer].sort((a, b) => y[a] - y[b]);
+      for (let i = 1; i < sorted.length; i++) {
+        if (y[sorted[i]] - y[sorted[i - 1]] < ROW_GAP) {
+          y[sorted[i]] = y[sorted[i - 1]] + ROW_GAP;
+          moved = true;
+        }
+      }
+    }
+    if (!moved) break;
+  }
+
+  // positions are top-left corners: centre each node on its layer column
+  const approxWidth = (n) => 48 + n.length * 7.5;
   return Object.fromEntries(
-    names.map((n) => {
-      const d = depth[n] ?? 0;
-      perLayer[d] = (perLayer[d] ?? 0) + 1;
-      return [n, { x: 60 + d * 200, y: 40 + (perLayer[d] - 1) * 110 + (d % 2) * 40 }];
-    })
+    names.map((n) => [n, { x: depth[n] * LAYER_GAP - approxWidth(n) / 2, y: y[n] - 17 }])
   );
+}
+
+/* ---------- geometry: straight edges between node borders ---------- */
+
+function nodeBox(node) {
+  const { x, y } = node.internals.positionAbsolute;
+  const w = node.measured?.width ?? 0;
+  const h = node.measured?.height ?? 0;
+  return { cx: x + w / 2, cy: y + h / 2, w, h };
+}
+
+/* Point where the ray from the box centre towards (tx, ty) leaves the box, plus a gap. */
+function borderPoint(box, tx, ty, gap = 0) {
+  const dx = tx - box.cx;
+  const dy = ty - box.cy;
+  if (dx === 0 && dy === 0) return { x: box.cx, y: box.cy };
+  const t = Math.min(
+    dx ? box.w / 2 / Math.abs(dx) : Infinity,
+    dy ? box.h / 2 / Math.abs(dy) : Infinity
+  );
+  const len = Math.hypot(dx, dy);
+  const k = t + gap / len;
+  return { x: box.cx + dx * k, y: box.cy + dy * k };
 }
 
 /* ---------- custom node ---------- */
 
-function VariableNode({ data }) {
+/* The whole body is the connection handle: press on a variable and drag to
+   another one. Where the drag starts is the cause, where it ends the effect.
+   Nodes move by their grip, so the two gestures never compete. */
+function VariableNode({ id, data }) {
+  const connection = useConnection();
+  const isTarget = connection.inProgress && connection.fromNode.id !== id;
   return (
     <div className={`var-node ${data.role}`}>
-      <Handle type="target" position={Position.Left} />
-      <span>{data.label}</span>
-      <Handle type="source" position={Position.Right} />
+      <div className="grip" title="drag to move">⋮⋮</div>
+      <div className="var-body">
+        {/* Both handles stay mounted (edges need them to render); only the
+            one that should receive the pointer right now is live. */}
+        <Handle
+          className={`body-handle ${connection.inProgress ? "idle" : ""}`}
+          type="source"
+          position={Position.Right}
+        />
+        <Handle
+          className={`body-handle ${isTarget ? "" : "idle"}`}
+          type="target"
+          position={Position.Left}
+          isConnectableStart={false}
+        />
+        <span>{data.label}</span>
+      </div>
     </div>
   );
 }
 const nodeTypes = { variable: VariableNode };
 
+function StraightEdge({ id, source, target, markerEnd, selected }) {
+  const s = useInternalNode(source);
+  const t = useInternalNode(target);
+  const { setEdges } = useReactFlow();
+  if (!s || !t) return null;
+
+  const sb = nodeBox(s);
+  const tb = nodeBox(t);
+  const start = borderPoint(sb, tb.cx, tb.cy, 2);
+  const end = borderPoint(tb, sb.cx, sb.cy, 4);
+  const [path, midX, midY] = getStraightPath({
+    sourceX: start.x, sourceY: start.y, targetX: end.x, targetY: end.y,
+  });
+
+  return (
+    <>
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} interactionWidth={24}
+        className={selected ? "edge-selected" : undefined} />
+      {selected && (
+        <EdgeLabelRenderer>
+          <button
+            className="edge-delete nodrag nopan"
+            style={{ transform: `translate(-50%, -50%) translate(${midX}px, ${midY}px)` }}
+            title="remove this edge"
+            onClick={() => setEdges((es) => es.filter((e) => e.id !== id))}
+          >
+            ×
+          </button>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
+}
+const edgeTypes = { straight: StraightEdge };
+
+/* The line being drawn: from the border of the start node to the cursor. */
+function ConnectionLine({ fromNode, toX, toY }) {
+  if (!fromNode) return null;
+  const start = borderPoint(nodeBox(fromNode), toX, toY, 2);
+  return (
+    <g>
+      <path className="connection-draft" d={`M${start.x},${start.y} L${toX},${toY}`} />
+      <circle cx={toX} cy={toY} r={3.5} className="connection-tip" />
+    </g>
+  );
+}
+
 const EDGE_OPTS = {
-  type: "default",
-  markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
+  type: "straight",
+  markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: "#6b6b6b" },
 };
+
+const edgeId = (s, d) => `${s}->${d}`;
 
 /* ---------- app ---------- */
 
@@ -83,6 +223,7 @@ export default function App() {
   const [source, setSource] = useState(null); // {kind:'example', name} | {kind:'file', file, rows}
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
+  const [graphKey, setGraphKey] = useState(0);
   const [treatment, setTreatment] = useState("");
   const [outcome, setOutcome] = useState("");
   const [method, setMethod] = useState("stratification");
@@ -123,19 +264,21 @@ export default function App() {
 
   const buildGraph = useCallback((names, pairs) => {
     const pos = layout(names, pairs);
+    setGraphKey((k) => k + 1); // remount the canvas so fitView frames the new graph
     setNodes(
       names.map((name) => ({
         id: name,
         type: "variable",
         position: pos[name],
         deletable: false,
+        dragHandle: ".grip",
         data: { label: name, role: "plain" },
       }))
     );
     setEdges(
       pairs
         .filter(([s, d]) => names.includes(s) && names.includes(d))
-        .map(([s, d]) => ({ id: `${s}->${d}`, source: s, target: d, ...EDGE_OPTS }))
+        .map(([s, d]) => ({ id: edgeId(s, d), source: s, target: d, ...EDGE_OPTS }))
     );
   }, []);
 
@@ -191,11 +334,17 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [dagText, treatment, outcome, columnKey]);
 
+  /* Drawing b -> a over an existing a -> b flips the arrow instead of
+     creating a two-node cycle; drawing an existing edge again is a no-op. */
   const onConnect = useCallback(
-    (conn) =>
-      setEdges((es) =>
-        conn.source === conn.target ? es : addEdge({ ...conn, ...EDGE_OPTS }, es)
-      ),
+    ({ source: s, target: d }) =>
+      setEdges((es) => {
+        if (s === d || es.some((e) => e.source === s && e.target === d)) return es;
+        return [
+          ...es.filter((e) => !(e.source === d && e.target === s)),
+          { id: edgeId(s, d), source: s, target: d, ...EDGE_OPTS },
+        ];
+      }),
     []
   );
 
@@ -428,20 +577,26 @@ export default function App() {
         )}
 
         <footer>
-          drag between handles to add an edge · select an edge and press Delete to remove it
+          drag from a variable to another to add a cause → effect edge · move a
+          variable by its ⋮⋮ grip · click an edge to remove it
         </footer>
       </aside>
 
       <main className="canvas">
         <ReactFlow
+          key={graphKey}
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          connectionLineComponent={ConnectionLine}
+          connectionRadius={0}
           onNodesChange={(ch) => setNodes((ns) => applyNodeChanges(ch, ns))}
           onEdgesChange={(ch) => setEdges((es) => applyEdgeChanges(ch, es))}
           onConnect={onConnect}
           deleteKeyCode={["Backspace", "Delete"]}
           fitView
+          fitViewOptions={{ padding: 0.25, maxZoom: 1.4 }}
           proOptions={{ hideAttribution: true }}
         >
           <Background gap={24} />

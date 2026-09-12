@@ -178,21 +178,84 @@ dl dd { margin: 0 0 4px 0; text-align: right; font-variant-numeric: tabular-nums
 }
 
 .var-node {
-  padding: 8px 16px;
+  display: flex;
+  align-items: stretch;
   border-radius: 8px;
   border: 1.5px solid var(--line);
   background: #fff;
   font-size: 13.5px;
   font-weight: 600;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  transition: box-shadow 0.12s;
 }
 .var-node.treatment { border-color: var(--accent); color: var(--accent); }
 .var-node.outcome { border-color: var(--green); color: var(--green); }
 .var-node.adjust { border-color: var(--amber); color: var(--amber); background: #fdf8ec; }
+.var-node:hover { box-shadow: 0 0 0 3px rgba(68, 89, 216, 0.15); }
 
-.var-node .react-flow__handle {
-  width: 9px;
-  height: 9px;
-  background: var(--muted);
-  border: 2px solid #fff;
+.var-node .grip {
+  display: flex;
+  align-items: center;
+  padding: 0 3px 0 7px;
+  color: #b5b5ae;
+  font-size: 11px;
+  letter-spacing: -2px;
+  cursor: grab;
+  user-select: none;
 }
+.var-node .grip:active { cursor: grabbing; }
+
+.var-body {
+  position: relative;
+  padding: 8px 16px 8px 6px;
+  cursor: crosshair;
+}
+.var-body span { position: relative; pointer-events: none; }
+
+/* the body-sized, invisible connection handle */
+.var-node .react-flow__handle.body-handle {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: none;
+  border: 0;
+  border-radius: 0 7px 7px 0;
+  background: transparent;
+  cursor: crosshair;
+}
+.var-node .react-flow__handle.body-handle.idle { pointer-events: none; }
+.var-node .react-flow__handle.body-handle.connectingto {
+  background: rgba(68, 89, 216, 0.12);
+}
+
+/* ---------- edges ---------- */
+
+.react-flow__edge-path { stroke: var(--muted); stroke-width: 1.6; }
+.react-flow__edge:hover .react-flow__edge-path { stroke: var(--ink); }
+.react-flow__edge-path.edge-selected { stroke: var(--accent); stroke-width: 2.2; }
+
+.connection-draft {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  stroke-dasharray: 5 4;
+}
+.connection-tip { fill: var(--accent); }
+
+.edge-delete {
+  position: absolute;
+  pointer-events: all;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--red);
+  background: #fff;
+  color: var(--red);
+  font-size: 14px;
+  line-height: 16px;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.edge-delete:hover { background: var(--red); color: #fff; }
