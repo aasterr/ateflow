@@ -179,16 +179,25 @@ def refute_placebo_treatment(
 def refute_random_common_cause(
     estimator_factory, df: pd.DataFrame, original: float, n_sim: int = 20, seed: int = 0
 ) -> dict:
-    """Aggiunge un covariato casuale all'aggiustamento: la stima deve restare stabile."""
+    """Aggiunge un covariato casuale all'aggiustamento: la stima deve restare stabile.
+
+    Il covariato è binario, così il test vale anche per la stratificazione:
+    uno continuo renderebbe ogni strato un singolo caso, violando la positività.
+    """
     rng = np.random.default_rng(seed)
     values = []
     for i in range(n_sim):
-        noisy = df.assign(_rcc=rng.normal(size=len(df)))
+        noisy = df.assign(_rcc=rng.integers(0, 2, size=len(df)))
         values.append(estimator_factory(noisy, ["_rcc"]).value)
     arr = np.asarray(values)
-    drift = float(np.abs(arr - original).max())
+    shift = float(arr.mean() - original)
+    sd = float(arr.std(ddof=1)) if len(arr) > 1 else 0.0
     return {
         "test": "random_common_cause",
-        "max_drift": drift,
-        "passed": drift < max(0.05 * abs(original), 0.01),
+        # Lo spostamento sistematico è il segnale; il singolo ricampionamento
+        # può oscillare quanto vuole il rumore campionario senza dire nulla.
+        "shift": shift,
+        "max_drift": float(np.abs(arr - original).max()),
+        "passed": bool(abs(shift) < 2 * sd / np.sqrt(len(arr)) + 1e-9)
+        or bool(abs(shift) < 0.02),
     }

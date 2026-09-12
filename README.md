@@ -48,6 +48,24 @@ res = estimate_ate(df, DAG.from_file("examples/corridor.dag"),
 print(res.report(), res.sign_flip, res.confounding_bias)
 ```
 
+## Validazione su dati reali
+
+`examples/episodes_100_v1.csv` sono i 100 episodi HRI del dataset
+[PeopleFlow](https://github.com/aasterr/PeopleFlow/tree/main/analysis): un robot
+che attraversa un corridoio e decide se emettere un segnale LED (`A`), con
+esito successo/timeout (`T`) e ostacoli statici come confonditore (`O`).
+
+```bash
+python -m ateflow --data examples/episodes_100_v1.csv --dag examples/hrisim.dag \
+    --treatment A --outcome T --method stratification
+```
+
+ateflow riproduce al terzo decimale le stime della tesi di riferimento:
+naive −0.207 (segno invertito dal confondimento), backdoor su `{O}` +0.061,
+backdoor su `{Pi, O}` +0.108 sui soli 64 episodi con overlap — lo strato
+`Pi=0, O=0` non contiene alcun episodio trattato e viene scartato, non riempito.
+`tests/test_hrisim.py` fissa questi numeri come regressione.
+
 ## Cosa fa oggi
 
 - DAG con controllo di aciclicità e parsing di catene (`a -> b -> c`)
