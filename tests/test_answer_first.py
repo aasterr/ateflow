@@ -101,3 +101,133 @@ def test_outcome_binary_flag(onboarding):
     assert res.data_report["outcome_binary"] is True
     res2 = estimate_ate(continuous_confounder(), CONTINUOUS_DAG, "t", "y", n_boot=0, refute=False)
     assert res2.data_report["outcome_binary"] is False
+
+
+# ---------- the answer in words ----------
+
+from ateflow import answer, service  # noqa: E402
+
+
+def payload_for(name, dag_extra="", **kw):
+    spec = service.EXAMPLES[name]
+    dag = (service.EXAMPLES_DIR / spec["dag"]).read_text() + dag_extra
+    p = service.estimate(service.example_bytes(name), dag, spec["treatment"], spec["outcome"],
+                         boot=200, **kw)
+    return p, spec["treatment"], spec["outcome"]
+
+
+@pytest.fixture(scope="module")
+def onboarding_answer():
+    p, t, o = payload_for("onboarding")
+    return answer.build(p, t, o)
+
+
+def test_headline_binary_outcome(onboarding_answer):
+    h = onboarding_answer["headline"]
+    assert h.startswith("Setting onboarding_email to 1 for everyone, instead of 0, would raise "
+                        "the share with retained_30d = 1 by 8.6 percentage points (95% CI +6.")
+    assert "cannot tell" not in h
+
+
+def test_naive_sentence_names_the_confounders_and_the_flip(onboarding_answer):
+    n = onboarding_answer["naive"]
+    assert n.startswith("Comparing the two groups as they are gives −6.9 points instead")
+    assert "channel and plan pull it down by 15.5 points" in n
+    assert "direction wrong" in n
+
+
+def test_technical_line(onboarding_answer):
+    assert onboarding_answer["technical"] == "ATE · adjusting for channel, plan · adjustment formula · 8000 rows"
+
+
+def test_checks_for_a_clean_case(onboarding_answer):
+    checks = onboarding_answer["checks"]
+    assert [c["title"] for c in checks] == ["Methods agree", "Overlap", "Placebo test", "Random common cause"]
+    assert all(c["ok"] for c in checks)
+
+
+def test_hrisim_answer_is_about_the_comparable_rows_and_flags_trouble():
+    p, t, o = payload_for("hrisim", "\nPi -> Pe")
+    a = answer.build(p, t, o)
+    assert a["headline"].startswith("Among the 64 of 100 rows where both groups occur, setting A to 1")
+    assert "cannot tell whether the effect is positive or negative" in a["headline"]
+    by_title = {c["title"]: c for c in a["checks"]}
+    assert not by_title["Methods disagree"]["ok"]
+    assert not by_title["Overlap"]["ok"]
+    assert "36 of 100 rows" in by_title["Overlap"]["text"]
+
+
+def test_front_door_answer():
+    p, t, o = payload_for("ads")
+    a = answer.build(p, t, o)
+    assert a["technical"].startswith("ATE · through visited_site · adjustment formula")
+    assert "an unmeasured confounder pushes it up by 26.9 points" in a["naive"]
+    assert [c["title"] for c in a["checks"]] == ["Methods agree", "Overlap", "Placebo test"]
+
+
+def test_numeric_outcome_uses_the_average():
+    p, t, o = payload_for("corridor")
+    a = answer.build(p, t, o)
+    assert a["headline"].startswith("Setting led to 1 for everyone, instead of 0, would raise "
+                                    "the average speed by 0.151 (95% CI +0.14")
+
+
+def test_labelled_treatment_and_outcome():
+    rng = np.random.default_rng(3)
+    n = 2000
+    z = rng.integers(0, 2, n)
+    t = rng.random(n) < 0.3 + 0.4 * z
+    y = rng.random(n) < 0.2 + 0.2 * t + 0.3 * z
+    df = pd.DataFrame({"z": z, "promo": np.where(t, "yes", "no"), "bought": np.where(y, "bought", "left")})
+    p = service.estimate(df.to_csv(index=False).encode(), "z -> promo\nz -> bought\npromo -> bought",
+                         "promo", "bought", boot=0, outcome_positive="bought")
+    a = answer.build(p, "promo", "bought")
+    assert a["headline"].startswith('Setting promo to "yes" for everyone, instead of "no", would raise '
+                                    'the share with bought = "bought" by ')
+
+
+def test_no_confounding_sentence():
+    rng = np.random.default_rng(4)
+    t = rng.integers(0, 2, 1000)
+    df = pd.DataFrame({"t": t, "y": t * 1.0 + rng.normal(0, 1, 1000)})
+    p = service.estimate(df.to_csv(index=False).encode(), "t -> y", "t", "y", boot=0)
+    a = answer.build(p, "t", "y")
+    assert a["naive"] == "Nothing confounds this comparison: the two groups as they are already give the answer."
+    assert "no adjustment needed" in a["technical"]
+
+
+def test_old_saved_result_without_new_keys(onboarding_answer):
+    p, t, o = payload_for("onboarding")
+    for key in ("comparison", "methods_agree", "method"):
+        p.pop(key)
+    p["data_report"].pop("outcome_binary")
+    a = answer.build(p, t, o)
+    assert "Methods agree" not in [c["title"] for c in a["checks"]]
+    assert a["headline"].startswith("Setting onboarding_email to 1")
+
+
+def test_answer_is_in_the_payload_and_the_service_op():
+    import json
+    p, t, o = payload_for("ads")
+    assert p["answer"] == answer.build(p, t, o)
+    out = json.loads(service.handle("answer", json.dumps({"result": p, "treatment": t, "outcome": o})))
+    assert out["ok"]["headline"] == p["answer"]["headline"]
+
+
+def test_numbers_keep_three_significant_digits():
+    p, t, o = payload_for("corridor")
+    a = answer.build(p, t, o)
+    assert "crowding pulls it down by 0.281" in a["naive"]
+    assert "g-computation +0.150" in a["checks"][0]["text"]
+
+
+def test_report_opens_with_the_answer():
+    from ateflow.report import render_report
+    p, t, o = payload_for("ads")
+    analysis = {"name": "ads", "created_at": "2026-09-13T10:00:00", "source": "example: ads",
+                "dag": (service.EXAMPLES_DIR / "ads.dag").read_text(), "treatment": t, "outcome": o,
+                "method": "auto", "result": p}
+    html = render_report(analysis)
+    assert html.index("<h2>Answer</h2>") < html.index("<h2>Question</h2>")
+    assert "would raise the share with purchased = 1 by 15.3 percentage points" in html
+    assert "method: adjustment formula" in html

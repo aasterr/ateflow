@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import sys
 
+from . import answer
 from .api import estimate_ate
 from .data import read_csv
 from .graph import DAG
+from .service import result_payload
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -53,6 +55,10 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    words = answer.build(result_payload(result), args.treatment, args.outcome)
+    print(words["headline"])
+    print(words["naive"])
+    print()
     print(result.report())
     return 0
 

@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from . import answer
 from .api import Result, estimate_ate
 from .data import DataError, profile, read_csv
 from .graph import DAG
@@ -266,7 +267,9 @@ def estimate(raw: bytes, dag: str, treatment: str, outcome: str,
         )
     except ValueError as exc:
         raise ServiceError(422, str(exc)) from exc
-    return result_payload(result)
+    payload = result_payload(result)
+    payload["answer"] = answer.build(payload, treatment, outcome)
+    return payload
 
 
 def example_bytes(name: str) -> bytes:
@@ -317,6 +320,8 @@ _OPS = {
     "estimate": _estimate_op,
     "examples": lambda p, raw: list_examples(),
     "report": lambda p, raw: {"html": report_html(p["analysis"])},
+    # results saved before the answer existed get their sentences on load
+    "answer": lambda p, raw: answer.build(p["result"], p["treatment"], p["outcome"]),
 }
 
 

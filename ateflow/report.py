@@ -9,6 +9,8 @@ from __future__ import annotations
 import html
 from datetime import datetime
 
+from . import answer
+from .answer import METHOD_LABELS
 from .graph import DAG
 
 _NODE_H = 34
@@ -88,18 +90,12 @@ def dag_svg(dag: DAG, treatment: str, outcome: str, adjustment: list[str]) -> st
     return "".join(parts)
 
 
-METHOD_LABELS = {
-    "adjustment-formula": "adjustment formula",
-    "g-computation": "g-computation",
-    "ipw": "IPW",
-    "aipw": "AIPW (doubly robust)",
-}
-
-
 def render_report(analysis: dict) -> str:
     result = analysis["result"]
     dag = DAG.parse(analysis["dag"])
     treatment, outcome = analysis["treatment"], analysis["outcome"]
+    words = result.get("answer") or answer.build(result, treatment, outcome)
+    method = result.get("method") or analysis["method"]
     adjustment = result["adjustment_set"]
     naive, adjusted = result["naive"], result["adjusted"]
     e = html.escape
@@ -206,6 +202,8 @@ def render_report(analysis: dict) -> str:
   td {{ border-top: 1px solid #e3e3de; padding: 6px 10px 6px 0; }}
   .ok {{ color: #1f7a4d; }} .bad {{ color: #b3362b; }}
   ul {{ padding-left: 20px; }} li {{ margin: 6px 0; }}
+  .headline {{ font-size: 21px; font-weight: 600; line-height: 1.4; margin-bottom: 4px; }}
+  .checks {{ list-style: none; padding-left: 0; }}
   footer {{ margin-top: 44px; color: #9a9a94; font-size: 12px;
             border-top: 1px solid #e3e3de; padding-top: 8px; }}
   @media print {{ body {{ margin: 0 auto; }} }}
@@ -213,7 +211,15 @@ def render_report(analysis: dict) -> str:
 </head>
 <body>
 <h1>{e(analysis['name'])}</h1>
-<p class="meta">{created} · data: {e(analysis['source'])} · method: {e(METHOD_LABELS.get(analysis['method'], analysis['method']))}</p>
+<p class="meta">{created} · data: {e(analysis['source'])} · method: {e(METHOD_LABELS.get(method, method))}</p>
+
+<h2>Answer</h2>
+<p class="headline">{e(words['headline'])}</p>
+<p class="meta">{e(words['technical'])}</p>
+<p>{e(words['naive'])}</p>
+<ul class="checks">{''.join(
+    f"<li><span class='{'ok' if c['ok'] else 'bad'}'>{'✓' if c['ok'] else '⚠'}</span> <strong>{e(c['title'])}</strong> — {e(c['text'])}</li>"
+    for c in words['checks'])}</ul>
 
 <h2>Question</h2>
 <p>Effect of <strong>{e(treatment)}</strong> on <strong>{e(outcome)}</strong>,
