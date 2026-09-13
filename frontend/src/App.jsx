@@ -517,6 +517,11 @@ export default function App() {
       const body = await engine.estimate({ ...question(), ...payload }, bytes);
       setResult(body);
       setResultKey(currentKey);
+      // on a phone the answer sits below the canvas: bring it into view
+      if (window.matchMedia("(max-width: 860px)").matches) {
+        requestAnimationFrame(() =>
+          document.querySelector(".panel")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      }
     } catch (err) {
       setResult(null);
       setError(err.message);
@@ -814,7 +819,9 @@ export default function App() {
           onConnect={onConnect}
           deleteKeyCode={["Backspace", "Delete"]}
           fitView
-          fitViewOptions={{ padding: 0.25, maxZoom: 1.4 }}
+          // a wide DAG must still fit a phone screen: allow zooming out further than the default 0.5
+          minZoom={0.2}
+          fitViewOptions={{ padding: 0.25, maxZoom: 1.4, minZoom: 0.2 }}
           proOptions={{ hideAttribution: true }}
         >
           <Background gap={24} />
