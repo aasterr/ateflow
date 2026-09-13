@@ -235,35 +235,34 @@ def adjustment_formula(
     counted in `diagnostics['dropped_rows']`: if there are many, positivity is weak.
     """
     t = _check_binary(df[treatment], treatment)
-    work = df.assign(**{treatment: t})
     if not adjustment_set:
-        return naive(work, treatment, outcome)
+        return naive(df.assign(**{treatment: t}), treatment, outcome)
 
-    total, total0, weight_used, dropped = 0.0, 0.0, 0.0, 0
-    for _, group in work.groupby(adjustment_set, dropna=False, observed=True):
-        arms = group[treatment].unique()
-        if not {0.0, 1.0} <= set(arms):
-            dropped += len(group)
-            continue
-        treated = group.loc[group[treatment] == 1, outcome].mean()
-        control = group.loc[group[treatment] == 0, outcome].mean()
-        w = len(group) / len(work)
-        total += w * (treated - control)
-        total0 += w * control
-        weight_used += w
-
-    if weight_used == 0:
+    # per group of confounder values: arm sizes and outcome sums, all at once
+    # (a loop over groups dominated the bootstrap, ~40x slower in the browser)
+    y = df[outcome].astype(float).to_numpy()
+    cells = df.groupby(adjustment_set, dropna=False, sort=False, observed=True).ngroup().to_numpy()
+    k = int(cells.max()) + 1
+    n1 = np.bincount(cells, weights=t, minlength=k)
+    n0 = np.bincount(cells, weights=1 - t, minlength=k)
+    usable = (n1 > 0) & (n0 > 0)
+    if not usable.any():
         raise ValueError("no group of confounder values contains both treatment arms: positivity violated")
+
+    treated = np.bincount(cells, weights=y * t, minlength=k)[usable] / n1[usable]
+    control = np.bincount(cells, weights=y * (1 - t), minlength=k)[usable] / n0[usable]
+    w = (n1 + n0)[usable] / len(df)  # P(Z = z)
+    dropped = int(len(df) - (n1 + n0)[usable].sum())
     return Estimate(
-        value=float(total / weight_used),
+        value=float((w * (treated - control)).sum() / w.sum()),
         method="adjustment-formula",
         adjustment_set=list(adjustment_set),
-        n=len(work),
+        n=len(df),
         diagnostics={
             "dropped_rows": dropped,
-            "dropped_fraction": round(dropped / len(work), 4),
+            "dropped_fraction": round(dropped / len(df), 4),
         },
-        mean_control=float(total0 / weight_used),
+        mean_control=float((w * control).sum() / w.sum()),
     )
 
 
