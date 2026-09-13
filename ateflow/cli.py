@@ -16,8 +16,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dag", required=True, help="path to the .dag file")
     p.add_argument("--treatment", required=True)
     p.add_argument("--outcome", required=True)
-    p.add_argument("--method", default="g-computation",
-                   choices=["g-computation", "adjustment-formula", "ipw", "aipw"])
+    p.add_argument("--method", default="auto",
+                   choices=["auto", "adjustment-formula", "g-computation", "ipw", "aipw"],
+                   help="estimator; auto picks it from the data and the identification")
     p.add_argument("--adjust", nargs="*", default=None,
                    help="force the adjustment set (it is validated)")
     p.add_argument("--boot", type=int, default=500, help="bootstrap resamples, 0 to skip")

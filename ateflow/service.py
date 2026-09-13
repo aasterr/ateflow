@@ -204,6 +204,9 @@ def result_payload(result: Result) -> dict:
         "data_report": result.data_report,
         "strategy": result.strategy,
         "explanation": result.explanation,
+        "method": result.method,
+        "comparison": result.comparison,
+        "methods_agree": result.methods_agree,
         "report": result.report(),
     }
 
@@ -250,7 +253,7 @@ def check_dag(dag: str, treatment: str | None = None, outcome: str | None = None
 
 
 def estimate(raw: bytes, dag: str, treatment: str, outcome: str,
-             method: str = "g-computation", boot: int = 500, refute: bool = True,
+             method: str = "auto", boot: int = 500, refute: bool = True,
              seed: int = 0, treated_value: str | None = None,
              outcome_positive: str | None = None, name: str = "upload") -> dict:
     """The full estimate on a CSV given as bytes."""

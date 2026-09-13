@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from .data import prepare
+from .data import column_kind, prepare
 from .estimate import (
     Estimate,
     aipw,
@@ -26,6 +26,33 @@ from .estimate import (
 )
 from .graph import DAG
 
+# every estimator of each identification strategy, in the order they are compared
+ESTIMATORS = {
+    "backdoor": {
+        "adjustment-formula": adjustment_formula,
+        "g-computation": g_computation,
+        "ipw": ipw,
+        "aipw": aipw,
+    },
+    "frontdoor": {
+        "adjustment-formula": frontdoor_formula,
+        "g-computation": frontdoor_g_computation,
+    },
+}
+
+
+def choose_method(strategy: str, data: pd.DataFrame, variables: list[str]) -> str:
+    """The estimator ateflow uses when the user does not pick one.
+
+    The exact adjustment formula whenever the variables are discrete, since it
+    assumes no model; with a continuous variable, AIPW for backdoor (right if
+    either of its two models is) and g-computation for front-door.
+    """
+    rows = data[variables].dropna()
+    if all(column_kind(rows[v]) != "continuous" for v in variables):
+        return "adjustment-formula"
+    return "aipw" if strategy == "backdoor" else "g-computation"
+
 
 @dataclass
 class Result:
@@ -37,6 +64,10 @@ class Result:
     data_report: dict = field(default_factory=dict)
     strategy: str = "backdoor"
     explanation: list[str] = field(default_factory=list)
+    method: str = ""
+    # point estimates of every estimator of the strategy on the same rows
+    comparison: list[dict] = field(default_factory=list)
+    methods_agree: bool = True
 
     @property
     def confounding_bias(self) -> float:
@@ -88,7 +119,7 @@ def estimate_ate(
     dag: DAG | str,
     treatment: str,
     outcome: str,
-    method: str = "g-computation",
+    method: str = "auto",
     adjustment_set: list[str] | None = None,
     n_boot: int = 500,
     refute: bool = True,
@@ -136,18 +167,9 @@ def estimate_ate(
                                  "which satisfies the backdoor criterion."]}
     strategy, chosen = ident["strategy"], ident["variables"]
 
-    estimators = {
-        "backdoor": {
-            "g-computation": g_computation,
-            "adjustment-formula": adjustment_formula,
-            "ipw": ipw,
-            "aipw": aipw,
-        },
-        "frontdoor": {
-            "g-computation": frontdoor_g_computation,
-            "adjustment-formula": frontdoor_formula,
-        },
-    }[strategy]
+    estimators = ESTIMATORS[strategy]
+    if method == "auto":
+        method = choose_method(strategy, data, chosen)
     if method not in estimators:
         if strategy == "frontdoor" and method in ("ipw", "aipw"):
             raise ValueError(
@@ -158,6 +180,7 @@ def estimate_ate(
         raise ValueError(f"unknown method {method!r}, use one of {sorted(estimators)}")
     fn = estimators[method]
 
+    raw = data
     data, data_report = prepare(
         data, treatment, outcome, chosen, method=method,
         treated_value=treated_value, outcome_positive=outcome_positive, strategy=strategy,
@@ -169,6 +192,27 @@ def estimate_ate(
     adjusted = run(data)
     if n_boot:
         adjusted.ci = bootstrap_ci(run, data, n_boot=n_boot, seed=seed)
+
+    comparison = []
+    for name, other in estimators.items():
+        entry = {"method": name, "value": None, "applicable": True, "reason": None,
+                 "primary": name == method}
+        try:
+            if name == method:
+                entry["value"] = adjusted.value
+            else:
+                # the prepared rows are shared; only the adjustment formula adds data rules
+                if name == "adjustment-formula":
+                    prepare(raw, treatment, outcome, chosen, method=name,
+                            treated_value=treated_value, outcome_positive=outcome_positive,
+                            strategy=strategy)
+                entry["value"] = other(data, treatment, outcome, chosen).value
+        except ValueError as exc:
+            entry.update(applicable=False, reason=str(exc))
+        comparison.append(entry)
+    values = [c["value"] for c in comparison if c["applicable"]]
+    methods_agree = (adjusted.ci is None or len(values) < 2
+                     or all(adjusted.ci[0] <= v <= adjusted.ci[1] for v in values))
 
     refutations: list[dict] = []
     if refute:
@@ -189,4 +233,7 @@ def estimate_ate(
         data_report=data_report,
         strategy=strategy,
         explanation=ident["explanation"],
+        method=method,
+        comparison=comparison,
+        methods_agree=methods_agree,
     )

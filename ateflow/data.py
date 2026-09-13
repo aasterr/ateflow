@@ -295,5 +295,7 @@ def prepare(
         "control": n_control,
         "treatment_coding": treatment_coding,
         "outcome_coding": outcome_coding,
+        "outcome_binary": bool(outcome_coding is not None
+                               or set(pd.unique(work[outcome])) <= {0.0, 1.0}),
         "warnings": warnings,
     }
