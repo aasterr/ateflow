@@ -8,7 +8,6 @@ examples/corridor.csv
 examples/onboarding.csv
 examples/ads.csv
 node_modules/
-ateflow/static/
 .claude/
 *.db
 frontend/public/py/

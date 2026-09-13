@@ -144,8 +144,9 @@ formula, or a two-step linear model). Intervals are percentile bootstrap with
 **Sensitivity.** The E-value (VanderWeele & Ding, 2017) is computed on the risk
 ratio of the adjusted means, with its interval from the same bootstrap. For a
 numeric outcome it uses the approximate conversion from the standardized
-difference. It is not computed for front-door answers, which already allow an
-unmeasured confounder.
+difference; that conversion is a rule of thumb, and the app shows the
+number as approximate with a warning next to it. It is not computed for
+front-door answers, which already allow an unmeasured confounder.
 
 **Data intake.** Delimiter, decimal comma and encoding are detected; column
 names are cleaned for the diagram. Each column is profiled (two values,
@@ -155,11 +156,11 @@ in the variables a question uses are dropped and counted. A treatment labelled
 other pairs ask which value is the treatment. Identifiers and free text
 cannot be adjusted for. Files are limited to 20 MB.
 
-**One engine, three front doors.** `ateflow/service.py` is called by the web
-app (in a Web Worker on Pyodide), by the optional FastAPI server and by the
-CLI, and every sentence of the answer comes from `ateflow/answer.py`. Saved
-analyses stay in the browser's IndexedDB, dataset included, and export as a
-standalone HTML report.
+**One engine, two ways in.** The web app runs `ateflow/service.py` in a Web
+Worker on Pyodide; the CLI and Python users call the same package directly.
+Every sentence of the answer comes from `ateflow/answer.py`. There is no
+server: saved analyses stay in the browser's IndexedDB, dataset included, and
+export as a standalone HTML report.
 
 ## Python and command line
 
@@ -199,17 +200,13 @@ pytest -q                                     # the engine, pinned to known effe
 cd frontend && npm install
 npm run dev                                   # the app with hot reload
 npm run smoke                                 # the engine under Pyodide in Node
-npm run build                                 # static site into ateflow/static
+npm run build                                 # static site into frontend/dist
 ```
 
 The public app is built and published to GitHub Pages by
 `.github/workflows/pages.yml` on every push to `master`, after the Pyodide
-smoke test passes. To self-host with the HTTP API (docs at `/docs`):
-
-```bash
-docker build -t ateflow .
-docker run -p 8080:8080 -v ateflow_data:/data ateflow
-```
+smoke test passes. To host it elsewhere, serve `frontend/dist` from any
+static file host.
 
 ## License
 

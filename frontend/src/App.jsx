@@ -253,7 +253,7 @@ const EDGE_OPTS = {
 
 const edgeId = (s, d) => `${s}->${d}`;
 
-/* Guide edits from /api/examples: {op: 'add' | 'remove' | 'flip', edge: [src, dst]}. */
+/* Guide edits from the engine's examples: {op: 'add' | 'remove' | 'flip', edge: [src, dst]}. */
 function applyGuideEdit(edges, { op, edge: [s, d] }) {
   const rest = edges.filter(
     (e) => !(e.source === s && e.target === d) && !(e.source === d && e.target === s)
@@ -278,7 +278,7 @@ const token = (v) => {
   return s === "1.0" ? "1" : s === "0.0" ? "0" : s;
 };
 
-/* For a two-valued column: which value the server will read as 1 on its own, or null. */
+/* For a two-valued column: which value the engine will read as 1 on its own, or null. */
 function autoPositive(values) {
   const tokens = values.map(token);
   if (!tokens.every((t) => TRUE_TOKENS.has(t) || FALSE_TOKENS.has(t))) return null;
@@ -305,7 +305,7 @@ export default function App() {
   const [resultKey, setResultKey] = useState("");
   const [panelOpen, setPanelOpen] = useState(true);
   const [tab, setTab] = useState("Answer"); // Answer | Data | Guide
-  const [profile, setProfile] = useState([]); // one entry per CSV column, from the server
+  const [profile, setProfile] = useState([]); // one entry per CSV column, from the engine
   const [dataInfo, setDataInfo] = useState(null); // what was detected reading an upload
   const [treatedValue, setTreatedValue] = useState("");
   const [outcomePositive, setOutcomePositive] = useState("");

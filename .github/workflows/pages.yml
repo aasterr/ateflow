@@ -37,7 +37,7 @@ jobs:
         working-directory: frontend
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: ateflow/static
+          path: frontend/dist
 
   deploy:
     needs: build

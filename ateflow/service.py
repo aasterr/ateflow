@@ -1,7 +1,6 @@
 """What the web app asks of the engine, independent of how it is asked.
 
-Both front doors use this module: `server.py` (FastAPI, for local installs)
-and the browser build, where the same code runs inside Pyodide in a Web
+The browser build calls it: the same code runs inside Pyodide in a Web
 Worker and the data never leave the page. Functions take plain values and
 bytes and return JSON-ready dicts; problems the user can fix raise
 ServiceError with an HTTP-like status and a readable message.
@@ -40,7 +39,7 @@ EXAMPLES_DIR = Path(os.environ.get("ATEFLOW_EXAMPLES",
 # Each example carries a short guide for the demo: the question, why the naive
 # and adjusted answers differ, and DAG edits worth trying. The numbers quoted
 # are adjustment-formula estimates on the bundled data (the UI default method);
-# tests/test_server.py applies every `edit` and checks the result against `expect`,
+# tests/test_service.py applies every `edit` and checks the result against `expect`,
 # so the texts cannot drift away from what the demo actually shows.
 EXAMPLES = {
     "corridor": {

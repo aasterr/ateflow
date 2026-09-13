@@ -9,11 +9,11 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const out = resolve(root, "frontend", "public", "py");
 
-// Server-only modules stay out: the browser has no FastAPI, SQLite store or CLI.
-const SERVER_ONLY = new Set(["server.py", "store.py", "cli.py", "__main__.py"]);
+// The command line stays out: the browser has no terminal.
+const CLI_ONLY = new Set(["cli.py", "__main__.py"]);
 
 const engine = readdirSync(join(root, "ateflow"))
-  .filter((f) => f.endsWith(".py") && !SERVER_ONLY.has(f))
+  .filter((f) => f.endsWith(".py") && !CLI_ONLY.has(f))
   .map((f) => `ateflow/${f}`);
 const examples = readdirSync(join(root, "examples"))
   .filter((f) => f.endsWith(".csv") || f.endsWith(".dag"))
