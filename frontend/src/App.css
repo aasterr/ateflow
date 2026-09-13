@@ -200,6 +200,15 @@ select {
 .check.info .mark { background: var(--accent); font-style: italic; font-family: Georgia, serif; }
 .check strong { color: var(--ink); font-size: 13px; }
 .check p { margin: 1px 0 0; font-size: 12.5px; }
+.check .caveat {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fdf3e0;
+  border: 1px solid #f0dcae;
+  color: #7a5205 !important;
+  font-size: 12px;
+}
 
 .depends { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 10px; }
 .depends summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--accent); }

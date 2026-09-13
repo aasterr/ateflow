@@ -68,9 +68,12 @@ def test_numeric_outcome_is_approximate():
     s = p["sensitivity"]
     assert s["approximate"] is True
     assert s["evalue"] > s["evalue_ci"] > 1
-    assert p["answer"]["checks"][-1]["text"].startswith(
-        f"To explain this effect away, a confounder missing from the DAG would need a risk ratio of about "
-        f"{s['evalue']:.1f} with both led and speed, beyond crowding (an approximation")
+    check = p["answer"]["checks"][-1]
+    assert check["title"] == "Hidden confounders (approximate)"
+    assert check["text"].startswith(
+        f"To explain this effect away, a confounder missing from the DAG would need a risk ratio of roughly "
+        f"{s['evalue']:.1f} with both led and speed, beyond crowding.")
+    assert "rule of thumb" in check["caveat"] and "not as an exact threshold" in check["caveat"]
 
 
 def test_front_door_has_no_evalue():
@@ -82,6 +85,7 @@ def test_answer_check_wording():
     check = p["answer"]["checks"][-1]
     assert check["title"] == "Hidden confounders"
     assert check["ok"] is None
+    assert "caveat" not in check  # binary outcome: the risk ratio is exact
     e, e_ci = p["sensitivity"]["evalue"], p["sensitivity"]["evalue_ci"]
     assert check["text"] == (
         "To explain this effect away, a confounder missing from the DAG would need to make both "
@@ -99,3 +103,12 @@ def test_answer_check_when_ci_includes_no_effect():
     assert check["text"].startswith(
         f"To explain this effect away, a confounder missing from the DAG would need to make both A and T about "
         f"{p['sensitivity']['evalue']:.1f}× more likely, beyond O and Pi. The 95% CI already includes no effect")
+
+
+def test_report_shows_the_caveat():
+    from ateflow.report import render_report
+    p = payload_for("corridor")
+    html = render_report({"name": "c", "created_at": "2026-09-13T10:00:00", "source": "example: corridor",
+                          "dag": (service.EXAMPLES_DIR / "corridor.dag").read_text(), "treatment": "led",
+                          "outcome": "speed", "method": "auto", "result": p})
+    assert "Hidden confounders (approximate)" in html and "rule of thumb" in html

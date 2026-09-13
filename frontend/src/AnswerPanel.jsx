@@ -68,6 +68,7 @@ function Result({ result, onGuide }) {
             <div>
               <strong>{c.title}</strong>
               <p>{c.text}</p>
+              {c.caveat && <p className="caveat">{c.caveat}</p>}
             </div>
           </li>
         ))}

@@ -17,6 +17,12 @@ METHOD_LABELS = {
 
 MINUS = "−"
 
+APPROXIMATE_EVALUE = (
+    "The outcome is a number, not yes/no, so this E-value comes from a rule of thumb: the effect "
+    "is converted to a risk ratio from its size in standard deviations. Read it as an order of "
+    "magnitude, not as an exact threshold."
+)
+
 
 def _signed(text: str) -> str:
     return text.replace("-", MINUS) if text.startswith("-") else text
@@ -178,7 +184,12 @@ def checks(payload: dict, treatment: str = "the treatment", outcome: str = "the 
         out.append({"ok": False, "title": "Data", "text": w[0].upper() + w[1:] + "."})
 
     if sens := payload.get("sensitivity"):
-        out.append({"ok": None, "title": "Hidden confounders", "text": _hidden(payload, sens, treatment, outcome)})
+        check = {"ok": None, "title": "Hidden confounders", "text": _hidden(payload, sens, treatment, outcome)}
+        if sens.get("approximate"):
+            # shown apart from the sentence: a bare number reads as exact
+            check["title"] = "Hidden confounders (approximate)"
+            check["caveat"] = APPROXIMATE_EVALUE
+        out.append(check)
     return out
 
 
@@ -188,8 +199,7 @@ def _hidden(payload: dict, sens: dict, treatment: str, outcome: str) -> str:
     beyond = f", beyond {_names(variables)}" if variables else ""
     if sens.get("approximate"):
         text = (f"To explain this effect away, a confounder missing from the DAG would need a risk "
-                f"ratio of about {sens['evalue']:.1f} with both {treatment} and {outcome}{beyond} "
-                "(an approximation, since the outcome is numeric).")
+                f"ratio of roughly {sens['evalue']:.1f} with both {treatment} and {outcome}{beyond}.")
     else:
         text = (f"To explain this effect away, a confounder missing from the DAG would need to make "
                 f"both {treatment} and {outcome} about {sens['evalue']:.1f}× more likely{beyond}.")

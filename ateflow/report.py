@@ -1,6 +1,6 @@
 """Standalone HTML report for a saved analysis: one file, print-friendly.
 
-The DAG is drawn server-side as inline SVG with the same layered layout the
+The DAG is drawn in Python as inline SVG with the same layered layout the
 frontend uses (x by longest path from a root, y by order within the layer).
 """
 
@@ -221,7 +221,7 @@ def render_report(analysis: dict) -> str:
 <p class="meta">{e(words['technical'])}</p>
 <p>{e(words['naive'])}</p>
 <ul class="checks">{''.join(
-    f"<li><span class='{'info' if c['ok'] is None else 'ok' if c['ok'] else 'bad'}'>{'ℹ' if c['ok'] is None else '✓' if c['ok'] else '⚠'}</span> <strong>{e(c['title'])}</strong> — {e(c['text'])}</li>"
+    f"<li><span class='{'info' if c['ok'] is None else 'ok' if c['ok'] else 'bad'}'>{'ℹ' if c['ok'] is None else '✓' if c['ok'] else '⚠'}</span> <strong>{e(c['title'])}</strong> — {e(c['text'])}{f"<br><em class='bad'>{e(c['caveat'])}</em>" if c.get('caveat') else ""}</li>"
     for c in words['checks'])}</ul>
 
 <h2>Question</h2>
