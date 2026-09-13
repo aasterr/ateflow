@@ -48,16 +48,85 @@ function Before({ check, hasQuestion }) {
   );
 }
 
+/* Zero, the interval, the effect and the direct comparison on one axis. */
+function IntervalBar({ bar }) {
+  const values = [0, bar.naive, bar.effect, ...(bar.ci ?? [])];
+  let lo = Math.min(...values);
+  let hi = Math.max(...values);
+  const pad = (hi - lo || 1) * 0.12;
+  lo -= pad;
+  hi += pad;
+  const W = 300;
+  const x = (v) => ((v - lo) / (hi - lo)) * W;
+  return (
+    <svg className="interval" viewBox={`0 0 ${W} 44`} role="img"
+      aria-label="effect with its 95% interval, the direct comparison and zero on one axis">
+      <line x1="0" x2={W} y1="20" y2="20" className="axis" />
+      <line x1={x(0)} x2={x(0)} y1="8" y2="32" className="zero" />
+      {Math.abs(x(0) - x(bar.naive)) > 30 && <text x={x(0)} y="42" className="tick">0</text>}
+      {bar.ci && <rect x={x(bar.ci[0])} width={Math.max(x(bar.ci[1]) - x(bar.ci[0]), 2)} y="14" height="12" rx="6" className="ci" />}
+      <circle cx={x(bar.naive)} cy="20" r="5" className="naive-dot" />
+      <text x={x(bar.naive)} y="42" className="tick">direct</text>
+      <circle cx={x(bar.effect)} cy="20" r="5.5" className="effect-dot" />
+      <text x={x(bar.effect)} y="7" className="tick effect-tick">effect</text>
+    </svg>
+  );
+}
+
+function Summary({ s }) {
+  return (
+    <div className="summary">
+      <div className="sum-row">
+        <span className="sum-label">What</span>
+        <div>
+          <strong>{s.what}</strong>
+          <p>{s.what_detail}</p>
+        </div>
+      </div>
+      <div className="sum-row">
+        <span className="sum-label">How</span>
+        <div>
+          <strong>{s.how}</strong>
+          <p>{s.how_detail}</p>
+        </div>
+      </div>
+      <div className="sum-row">
+        <span className="sum-label">Result</span>
+        <div>
+          <div className="nums">
+            <div className="num naive">
+              <span>direct comparison</span>
+              <b>{s.naive}</b>
+            </div>
+            <div className="num-arrow" aria-hidden="true">→</div>
+            <div className="num effect">
+              <span>effect</span>
+              <b>{s.effect}</b>
+            </div>
+          </div>
+          <p>
+            {s.unit && <>{s.unit} · </>}
+            {s.ci ? <>95% CI {s.ci}</> : "no interval computed"}
+          </p>
+          <IntervalBar bar={s.bar} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Result({ result, onGuide }) {
   const a = result.answer;
   const rep = result.data_report;
   const coding = (c) => (c && !["1", "1.0", "True"].includes(c["1"]) ? c["1"] : null);
   return (
     <>
-      <p className="headline">{a.headline}</p>
-      <p className="technical">{a.technical}</p>
+      <Summary s={a.summary} />
 
-      <h3>Compared as they are</h3>
+      <h3>In words</h3>
+      <p className="in-words">{a.headline}</p>
+
+      <h3>Why the direct comparison is off</h3>
       <p>{a.naive}</p>
 
       <h3>How much to trust it</h3>

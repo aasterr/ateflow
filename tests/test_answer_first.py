@@ -233,3 +233,45 @@ def test_report_opens_with_the_answer():
     assert html.index("<h2>Answer</h2>") < html.index("<h2>Question</h2>")
     assert "would raise the share with purchased = 1 by 15.3 percentage points" in html
     assert "method: adjustment formula" in html
+
+
+# ---------- summary: what is estimated, how, and the result ----------
+
+def test_summary_backdoor_binary(onboarding_answer):
+    s = onboarding_answer["summary"]
+    assert s["what"] == "Effect of onboarding_email on retained_30d"
+    assert s["what_detail"] == ("Average treatment effect (ATE): everyone with onboarding_email = 1 "
+                                "compared with everyone with onboarding_email = 0, as a change in the "
+                                "share with retained_30d = 1.")
+    assert s["how"] == "Backdoor adjustment for channel and plan"
+    assert s["how_detail"] == "adjustment formula · 8000 rows"
+    assert s["unit"] == "percentage points"
+    assert (s["naive"], s["effect"]) == ("−6.9", "+8.6")
+    assert s["ci"].startswith("+6.") and " to +1" in s["ci"]
+    lo, hi = s["bar"]["ci"]
+    assert s["bar"]["naive"] == pytest.approx(-6.9, abs=0.05)
+    assert s["bar"]["effect"] == pytest.approx(8.6, abs=0.05)
+    assert lo < s["bar"]["effect"] < hi
+
+
+def test_summary_front_door_numeric_and_dropped():
+    p, t, o = payload_for("ads")
+    s = answer.build(p, t, o)["summary"]
+    assert s["how"] == "Front-door through visited_site"
+
+    p, t, o = payload_for("corridor")
+    s = answer.build(p, t, o)["summary"]
+    assert s["unit"] == "" and s["effect"] == "+0.151" and s["naive"] == "−0.130"
+    assert s["what_detail"].endswith("as a change in the average speed.")
+
+    p, t, o = payload_for("hrisim", "\nPi -> Pe")
+    s = answer.build(p, t, o)["summary"]
+    assert s["how_detail"] == "adjustment formula · 64 of 100 rows (36 without a comparison group)"
+
+    rng = np.random.default_rng(4)
+    tt = rng.integers(0, 2, 1000)
+    df = pd.DataFrame({"t": tt, "y": tt * 1.0 + rng.normal(0, 1, 1000)})
+    p = service.estimate(df.to_csv(index=False).encode(), "t -> y", "t", "y", boot=0)
+    s = answer.build(p, "t", "y")["summary"]
+    assert s["how"] == "No adjustment needed: nothing in the DAG confounds t and y"
+    assert s["ci"] is None and s["bar"]["ci"] is None

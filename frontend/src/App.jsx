@@ -573,8 +573,8 @@ export default function App() {
       setOutcomePositive(op);
       setSource({ kind: "saved", id: a.id, name: a.name, bytes: a.csv, example: a.example });
       // analyses saved before the answer in words existed get their sentences now
-      const answer = a.result.answer ??
-        (await engine.answer({ result: a.result, treatment: a.treatment, outcome: a.outcome }));
+      const answer = a.result.answer?.summary ? a.result.answer :
+        await engine.answer({ result: a.result, treatment: a.treatment, outcome: a.outcome });
       setResult({ ...a.result, answer });
       setResultKey(questionKey(parseDagText(a.dag), a.treatment, a.outcome, tv, op));
       setError("");

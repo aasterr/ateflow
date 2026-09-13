@@ -213,8 +213,58 @@ def _hidden(payload: dict, sens: dict, treatment: str, outcome: str) -> str:
     return text
 
 
+def summary(payload: dict, treatment: str, outcome: str) -> dict:
+    """What is estimated, how, and the numbers: the part to read before any sentence."""
+    rep = payload.get("data_report") or {}
+    adjusted = payload["adjusted"]
+    scale = _Scale(_is_binary(payload))
+
+    labels = _labels(rep.get("treatment_coding"))
+    on, off = (f'"{labels[0]}"', f'"{labels[1]}"') if labels else ("1", "0")
+    if scale.binary:
+        o_labels = _labels(rep.get("outcome_coding"))
+        measure = f'the share with {outcome} = "{o_labels[0]}"' if o_labels else f"the share with {outcome} = 1"
+    else:
+        measure = f"the average {outcome}"
+
+    variables = payload.get("adjustment_set") or []
+    if payload.get("strategy") == "frontdoor":
+        how = f"Front-door through {', '.join(variables)}"
+    elif variables:
+        how = f"Backdoor adjustment for {_names(variables)}"
+    else:
+        how = f"No adjustment needed: nothing in the DAG confounds {treatment} and {outcome}"
+
+    method = payload.get("method") or adjusted.get("method", "")
+    rows = rep.get("rows_used", adjusted.get("n"))
+    dropped = adjusted.get("diagnostics", {}).get("dropped_rows", 0)
+    used = (f"{adjusted['n'] - dropped} of {adjusted['n']} rows ({dropped} without a comparison group)"
+            if dropped else f"{rows} rows")
+
+    factor = 100 if scale.binary else 1
+    ci = adjusted.get("ci")
+    return {
+        "what": f"Effect of {treatment} on {outcome}",
+        "what_detail": (f"Average treatment effect (ATE): everyone with {treatment} = {on} compared "
+                        f"with everyone with {treatment} = {off}, as a change in {measure}."),
+        "how": how,
+        "how_detail": f"{METHOD_LABELS.get(method, method)} · {used}",
+        "unit": "percentage points" if scale.binary else "",
+        "naive": scale.signed(payload["naive"]["value"], unit=False),
+        "effect": scale.signed(adjusted["value"], unit=False),
+        "ci": f"{scale.signed(ci[0], unit=False)} to {scale.signed(ci[1], unit=False)}" if ci else None,
+        # the same numbers in display units, for the interval chart
+        "bar": {
+            "naive": payload["naive"]["value"] * factor,
+            "effect": adjusted["value"] * factor,
+            "ci": [ci[0] * factor, ci[1] * factor] if ci else None,
+        },
+    }
+
+
 def build(payload: dict, treatment: str, outcome: str) -> dict:
     return {
+        "summary": summary(payload, treatment, outcome),
         "headline": headline(payload, treatment, outcome),
         "technical": technical(payload),
         "naive": naive(payload),
