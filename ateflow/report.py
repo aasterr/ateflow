@@ -110,13 +110,16 @@ def render_report(analysis: dict) -> str:
     names = e(", ".join(adjustment))
     if strategy == "frontdoor":
         question_how = (f"identified by the <strong>front-door</strong> criterion through "
-                        f"<strong>{{{names}}}</strong>: the confounder is unmeasured, the effect "
+                        f"<strong>{names}</strong>: the confounder is unmeasured, the effect "
                         "is rebuilt through the mediators.")
-        adjusted_label = f"front-door via {{{names}}}"
-    else:
-        question_how = (f"adjusting for <strong>{{{names or '∅'}}}</strong> "
+        adjusted_label = f"front-door through {names}"
+    elif adjustment:
+        question_how = (f"adjusting for <strong>{names}</strong> "
                         "(minimal backdoor set identified from the DAG below).")
-        adjusted_label = f"adjusted {{{names}}}"
+        adjusted_label = f"adjusted for {names}"
+    else:
+        question_how = "with no adjustment needed: nothing in the DAG below confounds the comparison."
+        adjusted_label = "adjusted (nothing to adjust)"
     explanation = result.get("explanation") or []
 
     interpretation = []
@@ -168,7 +171,7 @@ def render_report(analysis: dict) -> str:
         for r in result["refutations"]
     )
     alternatives = (
-        " · ".join("{" + ", ".join(s) + "}" for s in result["alternatives"][:4])
+        " — or ".join(", ".join(s) for s in result["alternatives"][:4])
         if result["alternatives"]
         else "none within one extra variable"
     )

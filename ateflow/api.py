@@ -93,7 +93,7 @@ class Result:
             lines.append("")
         adjusted = f"{self.adjusted}"
         if self.strategy == "frontdoor":
-            lines.append(f"identified by    : front-door through {{{', '.join(self.adjustment_set)}}}")
+            lines.append(f"identified by    : front-door through {', '.join(self.adjustment_set)}")
             adjusted = adjusted.replace("adjusting for:", "through:")
         lines += [
             f"{self.naive}",
@@ -102,6 +102,11 @@ class Result:
             f"confounding bias : {self.confounding_bias:+.3f}",
             f"sign flip        : {'YES' if self.sign_flip else 'no'}",
         ]
+        others = [c for c in self.comparison if c["applicable"]]
+        if len(others) > 1:
+            listed = " · ".join(f"{c['method']} {c['value']:+.3f}" for c in others)
+            lines.append(f"cross-check      : {listed} "
+                         f"({'agree' if self.methods_agree else 'DISAGREE'})")
         if self.alternatives:
             alts = " | ".join("{" + ", ".join(sorted(s)) + "}" for s in self.alternatives[:4])
             lines.append(f"other valid sets : {alts}")
@@ -163,7 +168,7 @@ def estimate_ate(
                 f"{treatment} -> {outcome}"
             )
         ident = {"strategy": "backdoor", "variables": sorted(adjustment_set), "alternatives": [],
-                 "explanation": [f"Adjusting for the given set {{{', '.join(sorted(adjustment_set))}}}, "
+                 "explanation": [f"Adjusting for the given set {', '.join(sorted(adjustment_set))}, "
                                  "which satisfies the backdoor criterion."]}
     strategy, chosen = ident["strategy"], ident["variables"]
 

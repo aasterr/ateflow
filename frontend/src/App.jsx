@@ -18,6 +18,9 @@ import {
 import "@xyflow/react/dist/style.css";
 import { engine, onProgress } from "./engine.js";
 import { store } from "./store.js";
+import AnswerPanel from "./AnswerPanel.jsx";
+import DataCheck, { LEFT_OUT } from "./DataCheck.jsx";
+import ExampleGuide from "./ExampleGuide.jsx";
 
 /* ---------- DAG helpers ---------- */
 
@@ -260,35 +263,12 @@ function applyGuideEdit(edges, { op, edge: [s, d] }) {
   return [...rest, { id: edgeId(from, to), source: from, target: to, ...EDGE_OPTS }];
 }
 
-function guideEditApplied(edges, { op, edge: [s, d] }) {
-  const has = (a, b) => edges.some((e) => e.source === a && e.target === b);
-  if (op === "add") return has(s, d);
-  if (op === "flip") return has(d, s) && !has(s, d);
-  return !has(s, d) && !has(d, s);
-}
-
 /* Identity of a question, to tell whether a shown result still matches the canvas. */
 const questionKey = (pairs, ...rest) =>
   [pairs.map(([s, d]) => `${s}->${d}`).sort().join(","), ...rest].join("|");
 
 /* ---------- data check helpers (mirror ateflow/data.py) ---------- */
 
-const KIND_NOTE = {
-  binary: "two values",
-  discrete: "few numeric values",
-  continuous: "numeric",
-  categorical: "categories",
-  identifier: "looks like an ID",
-  text: "free text",
-  constant: "never varies",
-  empty: "all missing",
-};
-const IDENT_SUMMARY = {
-  backdoor: "How the effect is identified: backdoor adjustment",
-  frontdoor: "How the effect is identified: front-door criterion",
-  none: "Why the effect is not identifiable",
-};
-const LEFT_OUT = new Set(["identifier", "text", "constant", "empty"]);
 const usableColumns = (profile) => profile.filter((p) => !LEFT_OUT.has(p.kind)).map((p) => p.name);
 
 const TRUE_TOKENS = new Set(["1", "true", "yes", "y", "si", "sì", "treated", "treatment", "on"]);
@@ -320,12 +300,11 @@ export default function App() {
   const [graphKey, setGraphKey] = useState(0);
   const [treatment, setTreatment] = useState("");
   const [outcome, setOutcome] = useState("");
-  const [method, setMethod] = useState("adjustment-formula");
-  const [check, setCheck] = useState(null); // {minimal, error}
+  const [check, setCheck] = useState(null); // {strategy, variables, explanation} | {error}
   const [result, setResult] = useState(null);
   const [resultKey, setResultKey] = useState("");
-  const [guideOpen, setGuideOpen] = useState(true);
-  const [identOpen, setIdentOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [tab, setTab] = useState("Answer"); // Answer | Data | Guide
   const [profile, setProfile] = useState([]); // one entry per CSV column, from the server
   const [dataInfo, setDataInfo] = useState(null); // what was detected reading an upload
   const [treatedValue, setTreatedValue] = useState("");
@@ -363,7 +342,7 @@ export default function App() {
   const unmeasuredNames = useMemo(() => nodes.filter((n) => n.data.unmeasured).map((n) => n.id), [nodes]);
   const dagText = useMemo(() => edgesToDagText(nodes, edges), [nodes, edges]);
   const currentKey = questionKey(
-    edges.map((e) => [e.source, e.target]), treatment, outcome, method, treatedValue, outcomePositive
+    edges.map((e) => [e.source, e.target]), treatment, outcome, treatedValue, outcomePositive
   );
   const profileOf = (name) => profile.find((p) => p.name === name);
 
@@ -403,8 +382,10 @@ export default function App() {
   };
   const stale = result && resultKey !== currentKey;
   const guide = source?.kind === "example" ? examples[source.name]?.guide : null;
-  const frontdoor = check?.strategy === "frontdoor";
-  const panelTitle = source?.kind === "file" ? "Data check" : guide ? "About this example" : "Identification";
+  const tabs = ["Answer", ...(source?.kind === "file" ? ["Data"] : []), ...(guide ? ["Guide"] : [])];
+  useEffect(() => {
+    if (!tabs.includes(tab)) setTab("Answer");
+  }, [tabs.join(), tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const roleOf = useCallback(
     (name) => {
@@ -454,6 +435,7 @@ export default function App() {
     setSource({ kind: "example", name });
     setResult(null);
     setError("");
+    setTab("Answer");
   };
 
   const loadFile = async (file) => {
@@ -471,7 +453,8 @@ export default function App() {
       setOutcomePositive("");
       setSource({ kind: "file", name: file.name, bytes, rows: body.rows });
       setResult(null);
-      setGuideOpen(true);
+      setPanelOpen(true);
+      setTab("Data");
     } catch (err) {
       setError(err.message);
     }
@@ -514,7 +497,7 @@ export default function App() {
     dag: dagText,
     treatment,
     outcome,
-    method,
+    method: "auto",
     boot: 500,
     treated_value: treatedValue || null,
     outcome_positive: outcomePositive || null,
@@ -527,13 +510,15 @@ export default function App() {
   const run = async () => {
     setBusy(true);
     setError("");
-    setResult(null);
+    setPanelOpen(true);
+    setTab("Answer");
     try {
       const { payload, bytes } = dataOf(source);
       const body = await engine.estimate({ ...question(), ...payload }, bytes);
       setResult(body);
       setResultKey(currentKey);
     } catch (err) {
+      setResult(null);
       setError(err.message);
     } finally {
       setBusy(false);
@@ -552,7 +537,7 @@ export default function App() {
         dag: dagText,
         treatment,
         outcome,
-        method,
+        method: result.method,
         result,
       });
       setSaveName("");
@@ -574,7 +559,6 @@ export default function App() {
       setDataInfo(null);
       setTreatment(a.treatment);
       setOutcome(a.outcome);
-      setMethod(a.method);
       // the coding chosen when it was saved travels in the stored result
       const rep = a.result.data_report;
       const tv = rep && !isZeroOne(Object.values(rep.treatment_coding)) ? rep.treatment_coding["1"] : "";
@@ -583,9 +567,14 @@ export default function App() {
       setTreatedValue(tv);
       setOutcomePositive(op);
       setSource({ kind: "saved", id: a.id, name: a.name, bytes: a.csv, example: a.example });
-      setResult(a.result);
-      setResultKey(questionKey(parseDagText(a.dag), a.treatment, a.outcome, a.method, tv, op));
+      // analyses saved before the answer in words existed get their sentences now
+      const answer = a.result.answer ??
+        (await engine.answer({ result: a.result, treatment: a.treatment, outcome: a.outcome }));
+      setResult({ ...a.result, answer });
+      setResultKey(questionKey(parseDagText(a.dag), a.treatment, a.outcome, tv, op));
       setError("");
+      setPanelOpen(true);
+      setTab("Answer");
     } catch (err) {
       setError(`could not load: ${err.message}`);
     }
@@ -614,22 +603,12 @@ export default function App() {
 
   const ready =
     source && treatment && outcome && treatment !== outcome && edges.length > 0 && check?.strategy &&
-    !(frontdoor && (method === "ipw" || method === "aipw")) &&
     !treatmentInfo?.error && !outcomeInfo?.error &&
     !(treatmentInfo?.values && !treatedValue) && !(outcomeInfo?.values && !outcomePositive);
 
-  useEffect(() => {
-    // weighting needs measured confounders: move off it when the question turns front-door
-    if (frontdoor && (method === "ipw" || method === "aipw")) setMethod("adjustment-formula");
-  }, [frontdoor, method]);
-  useEffect(() => {
-    // the interesting cases open the explanation by themselves
-    setIdentOpen(Boolean(check?.explanation) && check.strategy !== "backdoor");
-  }, [check?.strategy, check?.explanation]);
-
   const showWhy = () => {
-    setGuideOpen(true);
-    setIdentOpen(true);
+    setPanelOpen(true);
+    setTab("Answer");
   };
 
   const addUnmeasured = () => {
@@ -768,28 +747,13 @@ export default function App() {
                 </select>
               </label>
             )}
-            <label>
-              method
-              <select value={method} onChange={(e) => setMethod(e.target.value)}>
-                <option value="adjustment-formula">adjustment formula</option>
-                <option value="g-computation">g-computation</option>
-                <option value="ipw" disabled={frontdoor}>
-                  IPW (weighting){frontdoor ? " — backdoor only" : ""}
-                </option>
-                <option value="aipw" disabled={frontdoor}>
-                  AIPW (doubly robust){frontdoor ? " — backdoor only" : ""}
-                </option>
-              </select>
-            </label>
-            {check?.strategy === "backdoor" && (
+            {check?.strategy && (
               <p className="hint ok">
-                identified — adjusting for {"{"}{check.variables.join(", ") || "∅"}{"}"}{" "}
-                <button className="link why" onClick={showWhy}>why?</button>
-              </p>
-            )}
-            {frontdoor && (
-              <p className="hint ok">
-                identified by front-door — via {"{"}{check.variables.join(", ")}{"}"}{" "}
+                {check.strategy === "frontdoor"
+                  ? `identified by front-door, through ${check.variables.join(", ")}`
+                  : check.variables.length
+                    ? `identified, adjusting for ${check.variables.join(", ")}`
+                    : "identified, no adjustment needed"}{" "}
                 <button className="link why" onClick={showWhy}>why?</button>
               </p>
             )}
@@ -801,118 +765,12 @@ export default function App() {
             )}
             {check?.error && <p className="hint bad">{check.error}</p>}
             <button className="primary" disabled={!ready || busy} onClick={run}>
-              {busy ? "estimating…" : "Estimate ATE"}
+              {busy ? "estimating…" : "Estimate effect"}
             </button>
-            {busy && (
-              <p className="hint">
-                500 bootstrap resamples and the refutation tests, computed in your
-                browser — a few seconds.
-              </p>
-            )}
           </section>
         )}
 
         {error && <p className="hint bad">{error}</p>}
-
-        {result && (
-          <section className={stale ? "results stale" : "results"}>
-            <h2>3 · Result</h2>
-            {stale && (
-              <p className="hint bad">
-                The question changed since this estimate — press Estimate ATE again.
-              </p>
-            )}
-            <div className="ates">
-              <div className="ate naive">
-                <span className="label">naive</span>
-                <span className="value">{result.naive.value.toFixed(3)}</span>
-              </div>
-              <div className="arrow">→</div>
-              <div className="ate adjusted">
-                <span className="label">
-                  {result.strategy === "frontdoor" ? "front-door via" : "adjusted"}{" "}
-                  {"{"}{result.adjustment_set.join(", ")}{"}"}
-                </span>
-                <span className="value">{result.adjusted.value.toFixed(3)}</span>
-                {result.adjusted.ci && (
-                  <span className="ci">
-                    95% CI [{result.adjusted.ci[0].toFixed(3)}, {result.adjusted.ci[1].toFixed(3)}]
-                  </span>
-                )}
-              </div>
-            </div>
-            {result.sign_flip && (
-              <p className="badge">Simpson's paradox: adjustment flips the sign</p>
-            )}
-            {result.data_report && (
-              <div className="data-report">
-                <p>
-                  {result.data_report.rows_used} of {result.data_report.rows_in} rows used ·{" "}
-                  {result.data_report.treated} treated, {result.data_report.control} control
-                  {!isZeroOne(Object.values(result.data_report.treatment_coding)) && (
-                    <> · treated = “{result.data_report.treatment_coding["1"]}”</>
-                  )}
-                  {result.data_report.outcome_coding &&
-                    !isZeroOne(Object.values(result.data_report.outcome_coding)) && (
-                      <> · outcome 1 = “{result.data_report.outcome_coding["1"]}”</>
-                    )}
-                </p>
-                {result.data_report.warnings.map((w) => (
-                  <p key={w} className="warn">⚠ {w}</p>
-                ))}
-              </div>
-            )}
-            <dl>
-              <dt>confounding bias</dt>
-              <dd>{result.confounding_bias.toFixed(3)}</dd>
-              {result.adjusted.diagnostics.dropped_rows > 0 && (
-                <>
-                  <dt>dropped (no overlap)</dt>
-                  <dd>
-                    {result.adjusted.diagnostics.dropped_rows} of {result.adjusted.n} rows
-                  </dd>
-                </>
-              )}
-              {result.adjusted.diagnostics.effective_n !== undefined && (
-                <>
-                  <dt>effective sample size</dt>
-                  <dd>
-                    {Math.round(result.adjusted.diagnostics.effective_n)} of {result.adjusted.n}
-                  </dd>
-                </>
-              )}
-              {result.adjusted.diagnostics.clipped > 0 && (
-                <>
-                  <dt>weak overlap (clipped)</dt>
-                  <dd className="bad">
-                    {result.adjusted.diagnostics.clipped} of {result.adjusted.n} rows
-                  </dd>
-                </>
-              )}
-              {result.refutations.map((r) => (
-                <div key={r.test} className="refutation">
-                  <dt>{r.test.replaceAll("_", " ")}</dt>
-                  <dd className={r.passed ? "ok" : "bad"}>{r.passed ? "ok" : "suspect"}</dd>
-                </div>
-              ))}
-            </dl>
-            {result.alternatives.length > 0 && (
-              <p className="hint">
-                other valid sets: {result.alternatives.slice(0, 3).map((s) => `{${s.join(", ")}}`).join("  ")}
-              </p>
-            )}
-            <div className="save-row">
-              <input
-                placeholder={`${treatment} on ${outcome}`}
-                value={saveName}
-                onChange={(e) => setSaveName(e.target.value)}
-              />
-              <button className="chip" disabled={saving} onClick={saveAnalysis}>
-                {saving ? "saving…" : "save"}
-              </button>
-            </div>
-          </section>
-        )}
 
         {savedList.length > 0 && (
           <section>
@@ -978,113 +836,39 @@ export default function App() {
         )}
       </main>
 
-      {source && (guide || source.kind === "file" || check?.explanation) && (
-        guideOpen ? (
-          <aside className={source.kind === "file" ? "guide data-check" : "guide"}>
-            <div className="guide-head">
-              <span className="eyebrow">{panelTitle}</span>
-              <button className="link" title="hide" onClick={() => setGuideOpen(false)}>hide</button>
-            </div>
-            {check?.explanation && (
-              <details
-                className={`ident ident-${check.strategy ?? "none"}`}
-                open={identOpen}
-                onToggle={(e) => setIdentOpen(e.currentTarget.open)}
-              >
-                <summary>{IDENT_SUMMARY[check.strategy ?? "none"]}</summary>
-                <ul>
-                  {check.explanation.map((line) => <li key={line}>{line}</li>)}
-                </ul>
-              </details>
+      {source && (
+        panelOpen ? (
+          <AnswerPanel
+            tabs={tabs}
+            tab={tab}
+            setTab={setTab}
+            onHide={() => setPanelOpen(false)}
+            check={check}
+            hasQuestion={Boolean(treatment && outcome && treatment !== outcome)}
+            result={result}
+            stale={stale}
+            busy={busy}
+            ready={ready}
+            onEstimate={run}
+            saveName={saveName}
+            setSaveName={setSaveName}
+            saving={saving}
+            onSave={saveAnalysis}
+            savePlaceholder={`${treatment} on ${outcome}`}
+            dataCheck={source.kind === "file" && profile.length > 0 && (
+              <DataCheck source={source} dataInfo={dataInfo} profile={profile}
+                columnNames={columnNames} onToggle={toggleColumn} />
             )}
-            {source.kind === "file" && profile.length > 0 && (
-              <>
-            <h2>{source.name}</h2>
-            {dataInfo && (
-              <p className="hint">
-                {dataInfo.rows} rows · {dataInfo.delimiter}-separated · decimal {dataInfo.decimal}
-                {dataInfo.encoding !== "utf-8" && <> · {dataInfo.encoding} encoding</>}
-              </p>
+            guide={guide && (
+              <ExampleGuide guide={guide} edges={edges}
+                onApply={(edit) => setEdges((es) => applyGuideEdit(es, edit))}
+                onReset={() => loadExample(source.name)} />
             )}
-            {dataInfo && Object.keys(dataInfo.renamed).length > 0 && (
-              <p className="warn">
-                Renamed for the DAG:{" "}
-                {Object.entries(dataInfo.renamed).map(([a, b]) => `“${a}” → ${b}`).join(", ")}
-              </p>
-            )}
-            <p>
-              Tick the variables that belong in the DAG. The treatment needs exactly two
-              values; the outcome a number or two values. Rows with a missing value in the
-              variables you use are dropped, and counted in the result.
-            </p>
-            <table>
-              <tbody>
-                {profile.map((p) => {
-                  const on = columnNames.includes(p.name);
-                  return (
-                    <tr key={p.name} className={on ? "" : "off"}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={on}
-                          disabled={p.kind === "empty"}
-                          onChange={() => toggleColumn(p.name)}
-                          aria-label={`include ${p.name}`}
-                        />
-                      </td>
-                      <td>
-                        <div className="col-name">{p.name}</div>
-                        <div className="col-examples" title={p.examples.join(", ")}>
-                          {p.examples.join(", ")}
-                        </div>
-                      </td>
-                      <td>
-                        <span className={`kind ${LEFT_OUT.has(p.kind) ? "kind-out" : ""}`}>
-                          {KIND_NOTE[p.kind]}
-                        </span>
-                        {p.missing > 0 && (
-                          <div className="col-missing">{p.missing} missing</div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-              </>
-            )}
-            {guide && (
-              <>
-            <h2>{guide.title}</h2>
-            <p>{guide.story}</p>
-            <h3>Why naive and adjusted differ</h3>
-            <p>{guide.why}</p>
-            <h3>Try changing the DAG</h3>
-            <ul>
-              {guide.tries.map((tip) => {
-                const applied = guideEditApplied(edges, tip.edit);
-                return (
-                  <li key={tip.edit.op + tip.edit.edge.join()}>
-                    <p>{tip.text}</p>
-                    <button
-                      className={applied ? "chip small applied" : "chip small"}
-                      disabled={applied}
-                      onClick={() => setEdges((es) => applyGuideEdit(es, tip.edit))}
-                    >
-                      {applied ? "applied — now estimate" : "apply to the DAG"}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-            <button className="link" onClick={() => loadExample(source.name)}>
-              ↺ reset to the original DAG
-            </button>
-              </>
-            )}
-          </aside>
+          />
         ) : (
-          <button className="guide-tab" onClick={() => setGuideOpen(true)}>{panelTitle}</button>
+          <button className="guide-tab" onClick={() => setPanelOpen(true)}>
+            {result && !stale ? "Show the answer" : "Show the panel"}
+          </button>
         )
       )}
     </div>

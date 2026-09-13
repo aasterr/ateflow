@@ -11,14 +11,14 @@ how much does the outcome change net of confounders?
 
 Everything that does not serve this sentence stays out.
 
-**[Try it →](https://aasterr.github.io/ateflow/)** — open a CSV, draw the DAG, get the estimate.
+**[Try it →](https://aasterr.github.io/ateflow/)** — open a CSV, draw the DAG, read the answer in words.
 **Everything runs in your browser**: the engine is the same Python package,
 compiled to WebAssembly with [Pyodide](https://pyodide.org), so the file you
 open is never uploaded anywhere. The first visit downloads Python, numpy and
 pandas (a few seconds, then cached); an estimate with 500 bootstrap resamples
 and the refutation tests takes 2–5 seconds.
 
-![The DAG editor, with the naive and adjusted estimates side by side](docs/screenshot.png)
+![The question on the left, the DAG in the middle, the answer in words on the right](docs/screenshot.png)
 
 ## Usage
 
@@ -39,14 +39,25 @@ python -m ateflow --data examples/corridor.csv --dag examples/corridor.dag \
 ```
 
 ```
-naive            ATE = -0.130   adjusting for: none
-g-computation    ATE = +0.150  95% CI [+0.143, +0.157]   adjusting for: crowding
+Setting led to 1 for everyone, instead of 0, would raise the average speed by 0.151 (95% CI +0.143 to +0.159).
+Comparing the two groups as they are gives −0.130 instead: crowding pulls it down by 0.281 — it even gets the direction wrong.
 
-confounding bias : -0.280
+rows used        : 4000 of 4000 (1935 treated, 2065 control)
+
+naive              ATE = -0.130   adjusting for: none
+adjustment-formula ATE = +0.151  95% CI [+0.143, +0.159]   adjusting for: crowding
+
+confounding bias : -0.281
 sign flip        : YES
+cross-check      : adjustment-formula +0.151 · g-computation +0.150 · ipw +0.151 · aipw +0.151 (agree)
 refutation placebo_treatment      ok        mean=-0.0000, sd=+0.0037
-refutation random_common_cause    ok        shift=-0.0000, max_drift=+0.0002
+refutation random_common_cause    ok        shift=+0.0000, max_drift=+0.0002
 ```
+
+You never pick the estimator: ateflow uses the exact adjustment formula when
+the confounders are discrete, AIPW (doubly robust) when one is continuous, and
+runs every other estimator on the same rows as a cross-check. If they do not
+all fall inside the 95% CI, the answer says so.
 
 The true ATE of the synthetic dataset is +0.15. The unadjusted estimate has the
 wrong sign: `crowding` turns the LED on more often and lowers speed at the same
@@ -74,11 +85,8 @@ python -m ateflow --data examples/onboarding.csv --dag examples/onboarding.dag \
 ```
 
 ```
-naive            ATE = -0.069   adjusting for: none
-g-computation    ATE = +0.090  95% CI [+0.067, +0.114]   adjusting for: channel, plan
-
-confounding bias : -0.158
-sign flip        : YES
+Setting onboarding_email to 1 for everyone, instead of 0, would raise the share with retained_30d = 1 by 8.6 percentage points (95% CI +6.1 to +11.0).
+Comparing the two groups as they are gives −6.9 points instead: channel and plan pull it down by 15.5 points — it even gets the direction wrong.
 ```
 
 The true effect is +9 retention points. The DAG also marks `active_week1` as
@@ -102,19 +110,18 @@ saw_ad -> visited_site -> purchased
 
 ```bash
 python -m ateflow --data examples/ads.csv --dag examples/ads.dag \
-    --treatment saw_ad --outcome purchased --method adjustment-formula
+    --treatment saw_ad --outcome purchased
 ```
 
 ```
-identified by    : front-door through {visited_site}
-naive            ATE = +0.422   adjusting for: none
-adjustment-formula ATE = +0.153  95% CI [+0.137, +0.172]   through: visited_site
+Setting saw_ad to 1 for everyone, instead of 0, would raise the share with purchased = 1 by 15.3 percentage points (95% CI +13.4 to +17.4).
+Comparing the two groups as they are gives +42.2 points instead: an unmeasured confounder pushes it up by 26.9 points.
 ```
 
 The true effect is +0.15; the naive comparison nearly triples it. Identification
 always tries backdoor adjustment first, falls back to front-door, and otherwise
 refuses with the path that makes the effect unidentifiable — in the app, the
-"why?" link next to the identification line opens that explanation.
+"why?" link next to the identification line opens that explanation in the Answer panel.
 
 ## Validation on real data
 
@@ -126,12 +133,12 @@ confounder (`O`).
 
 ```bash
 python -m ateflow --data examples/episodes_100_v1.csv --dag examples/hrisim.dag \
-    --treatment A --outcome T --method adjustment-formula
+    --treatment A --outcome T
 ```
 
 ateflow reproduces the estimates of the reference thesis to the third decimal:
-naive −0.207 (sign inverted by confounding), backdoor on `{O}` +0.061, backdoor
-on `{Pi, O}` +0.108 on the 64 episodes with overlap — the group `Pi=0, O=0`
+naive −0.207 (sign inverted by confounding), backdoor on `O` +0.061, backdoor
+on `Pi, O` +0.108 on the 64 episodes with overlap — the group `Pi=0, O=0`
 contains no treated episode and is dropped, not imputed.
 `tests/test_hrisim.py` pins these numbers as a regression.
 

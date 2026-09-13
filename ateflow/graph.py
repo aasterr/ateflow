@@ -352,7 +352,7 @@ class DAG:
                                    "so the naive comparison is already causal.")
             else:
                 explanation.append(
-                    f"Adjusting for {{{', '.join(minimal)}}} blocks every path that enters "
+                    f"Adjusting for {', '.join(minimal)} blocks every path that enters "
                     f"{treatment} from behind (backdoor criterion):")
                 for p in backdoor_paths:
                     explanation.append(f"{self.path_text(p)} — blocked at {self.path_blocker(p, minimal)}")
@@ -375,12 +375,12 @@ class DAG:
                 "strategy": "frontdoor", "variables": m,
                 "alternatives": [sorted(s) for s in fronts[1:4]],
                 "explanation": why_not + [
-                    f"Front-door through {{{names}}} instead:",
-                    f"every directed path from {treatment} to {outcome} passes through {{{names}}};",
-                    f"nothing confounds {treatment} and {{{names}}};",
-                    f"{treatment} blocks every backdoor path from {{{names}}} to {outcome}.",
-                    f"So the effect is rebuilt in two steps: {treatment} → {{{names}}}, "
-                    f"then {{{names}}} → {outcome} adjusting for {treatment}.",
+                    f"Front-door through {names} instead:",
+                    f"every directed path from {treatment} to {outcome} passes through {names};",
+                    f"nothing confounds {treatment} and {names};",
+                    f"{treatment} blocks every backdoor path from {names} to {outcome}.",
+                    f"So the effect is rebuilt in two steps: {treatment} → {names}, "
+                    f"then {names} → {outcome} adjusting for {treatment}.",
                 ],
                 "backdoor_paths": [self.path_text(p) for p in backdoor_paths],
             }

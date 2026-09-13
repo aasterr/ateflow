@@ -46,4 +46,5 @@ export const engine = {
   check: (payload) => call("check", payload),
   estimate: (payload, bytes) => call("estimate", payload, bytes),
   report: (analysis) => call("report", { analysis }).then((r) => r.html),
+  answer: (payload) => call("answer", payload),
 };

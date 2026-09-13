@@ -27,7 +27,7 @@ class Estimate:
     def __str__(self) -> str:
         ci = f"  95% CI [{self.ci[0]:+.3f}, {self.ci[1]:+.3f}]" if self.ci else ""
         adj = ", ".join(self.adjustment_set) or "none"
-        return f"{self.method:<16} ATE = {self.value:+.3f}{ci}   adjusting for: {adj}"
+        return f"{self.method:<18} ATE = {self.value:+.3f}{ci}   adjusting for: {adj}"
 
 
 def _check_binary(series: pd.Series, name: str) -> np.ndarray:

@@ -56,8 +56,8 @@ After an estimate, top to bottom:
 3. **Compared as they are**: naive value in the same unit and the sentence
    `answer.naive`; the sign-flip badge stays.
 4. **How much to trust it**: a checklist, each row ✓ or ⚠ with one sentence:
-   - methods agree / disagree, with a small table of every applicable
-     estimator's point estimate (primary marked);
+   - methods agree / disagree, listing every applicable
+     estimator's point estimate;
    - overlap: rows dropped for no comparison group, or weights clipped;
    - placebo treatment test; random common cause test (backdoor only);
    - data warnings from the data report.
