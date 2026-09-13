@@ -197,6 +197,7 @@ select {
 }
 .check.ok .mark { background: var(--green); }
 .check.bad .mark { background: var(--amber); }
+.check.info .mark { background: var(--accent); font-style: italic; font-family: Georgia, serif; }
 .check strong { color: var(--ink); font-size: 13px; }
 .check p { margin: 1px 0 0; font-size: 12.5px; }
 

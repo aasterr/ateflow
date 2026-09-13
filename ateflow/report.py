@@ -203,7 +203,7 @@ def render_report(analysis: dict) -> str:
   .ci {{ font-size: 13px; color: #6b6b6b; }}
   table {{ border-collapse: collapse; width: 100%; font-size: 14px; }}
   td {{ border-top: 1px solid #e3e3de; padding: 6px 10px 6px 0; }}
-  .ok {{ color: #1f7a4d; }} .bad {{ color: #b3362b; }}
+  .ok {{ color: #1f7a4d; }} .bad {{ color: #b3362b; }} .info {{ color: #4459d8; }}
   ul {{ padding-left: 20px; }} li {{ margin: 6px 0; }}
   .headline {{ font-size: 21px; font-weight: 600; line-height: 1.4; margin-bottom: 4px; }}
   .checks {{ list-style: none; padding-left: 0; }}
@@ -221,7 +221,7 @@ def render_report(analysis: dict) -> str:
 <p class="meta">{e(words['technical'])}</p>
 <p>{e(words['naive'])}</p>
 <ul class="checks">{''.join(
-    f"<li><span class='{'ok' if c['ok'] else 'bad'}'>{'✓' if c['ok'] else '⚠'}</span> <strong>{e(c['title'])}</strong> — {e(c['text'])}</li>"
+    f"<li><span class='{'info' if c['ok'] is None else 'ok' if c['ok'] else 'bad'}'>{'ℹ' if c['ok'] is None else '✓' if c['ok'] else '⚠'}</span> <strong>{e(c['title'])}</strong> — {e(c['text'])}</li>"
     for c in words['checks'])}</ul>
 
 <h2>Question</h2>

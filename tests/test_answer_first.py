@@ -142,8 +142,10 @@ def test_technical_line(onboarding_answer):
 
 def test_checks_for_a_clean_case(onboarding_answer):
     checks = onboarding_answer["checks"]
-    assert [c["title"] for c in checks] == ["Methods agree", "Overlap", "Placebo test", "Random common cause"]
-    assert all(c["ok"] for c in checks)
+    assert [c["title"] for c in checks] == ["Methods agree", "Overlap", "Placebo test", "Random common cause",
+                                            "Hidden confounders"]
+    assert all(c["ok"] for c in checks[:-1])
+    assert checks[-1]["ok"] is None  # information, not pass/fail
 
 
 def test_hrisim_answer_is_about_the_comparable_rows_and_flags_trouble():

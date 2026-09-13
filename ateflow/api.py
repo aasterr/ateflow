@@ -14,7 +14,8 @@ from .data import column_kind, prepare
 from .estimate import (
     Estimate,
     aipw,
-    bootstrap_ci,
+    bootstrap,
+    percentile_ci,
     frontdoor_formula,
     frontdoor_g_computation,
     g_computation,
@@ -25,6 +26,7 @@ from .estimate import (
     adjustment_formula,
 )
 from .graph import DAG
+from .sensitivity import assess
 
 # every estimator of each identification strategy, in the order they are compared
 ESTIMATORS = {
@@ -68,6 +70,8 @@ class Result:
     # point estimates of every estimator of the strategy on the same rows
     comparison: list[dict] = field(default_factory=list)
     methods_agree: bool = True
+    # E-values against a confounder missing from the DAG (backdoor only), or None
+    sensitivity: dict | None = None
 
     @property
     def confounding_bias(self) -> float:
@@ -195,8 +199,12 @@ def estimate_ate(
         return fn(frame, treatment, outcome, chosen + list(extra or []))
 
     adjusted = run(data)
-    if n_boot:
-        adjusted.ci = bootstrap_ci(run, data, n_boot=n_boot, seed=seed)
+    draws = bootstrap(run, data, n_boot=n_boot, seed=seed) if n_boot else []
+    if draws:
+        adjusted.ci = percentile_ci([d.value for d in draws])
+    # front-door already allows an unmeasured confounder: the E-value question does not apply
+    sensitivity = (assess(adjusted, draws, data, outcome, data_report["outcome_binary"])
+                   if strategy == "backdoor" else None)
 
     comparison = []
     for name, other in estimators.items():
@@ -241,4 +249,5 @@ def estimate_ate(
         method=method,
         comparison=comparison,
         methods_agree=methods_agree,
+        sensitivity=sensitivity,
     )

@@ -23,6 +23,8 @@ class Estimate:
     ci: tuple[float, float] | None = None
     n: int = 0
     diagnostics: dict = field(default_factory=dict)
+    # E[Y | do(T=0)] for the estimators that can give it: the baseline of a risk ratio
+    mean_control: float | None = None
 
     def __str__(self) -> str:
         ci = f"  95% CI [{self.ci[0]:+.3f}, {self.ci[1]:+.3f}]" if self.ci else ""
@@ -50,7 +52,8 @@ def naive(df: pd.DataFrame, treatment: str, outcome: str) -> Estimate:
     t = _check_binary(df[treatment], treatment)
     y = df[outcome].astype(float).to_numpy()
     value = y[t == 1].mean() - y[t == 0].mean()
-    return Estimate(value=float(value), method="naive", adjustment_set=[], n=len(df))
+    return Estimate(value=float(value), method="naive", adjustment_set=[], n=len(df),
+                    mean_control=float(y[t == 0].mean()))
 
 
 def g_computation(
@@ -75,6 +78,7 @@ def g_computation(
         adjustment_set=list(adjustment_set),
         n=len(df),
         diagnostics={"residual_sd": residual_sd},
+        mean_control=float(y0.mean()),
     )
 
 
@@ -177,13 +181,15 @@ def ipw(
     w1, w0 = t / e, (1 - t) / (1 - e)
     if w1.sum() == 0 or w0.sum() == 0:
         raise ValueError("one treatment arm is empty")
-    value = (w1 * y).sum() / w1.sum() - (w0 * y).sum() / w0.sum()
+    mean0 = (w0 * y).sum() / w0.sum()
+    value = (w1 * y).sum() / w1.sum() - mean0
     return Estimate(
         value=float(value),
         method="ipw",
         adjustment_set=list(adjustment_set),
         n=len(df),
         diagnostics=_overlap_diagnostics(e_raw, t),
+        mean_control=float(mean0),
     )
 
 
@@ -205,13 +211,15 @@ def aipw(
     e_raw = _propensity_scores(df, t, adjustment_set)
     e = e_raw.clip(PROPENSITY_CLIP, 1 - PROPENSITY_CLIP)
     m1, m0, _ = _outcome_model(t, y, z)
-    psi = m1 - m0 + t * (y - m1) / e - (1 - t) * (y - m0) / (1 - e)
+    psi0 = m0 + (1 - t) * (y - m0) / (1 - e)
+    psi = m1 + t * (y - m1) / e - psi0
     return Estimate(
         value=float(psi.mean()),
         method="aipw",
         adjustment_set=list(adjustment_set),
         n=len(df),
         diagnostics=_overlap_diagnostics(e_raw, t),
+        mean_control=float(psi0.mean()),
     )
 
 
@@ -231,7 +239,7 @@ def adjustment_formula(
     if not adjustment_set:
         return naive(work, treatment, outcome)
 
-    total, weight_used, dropped = 0.0, 0.0, 0
+    total, total0, weight_used, dropped = 0.0, 0.0, 0.0, 0
     for _, group in work.groupby(adjustment_set, dropna=False, observed=True):
         arms = group[treatment].unique()
         if not {0.0, 1.0} <= set(arms):
@@ -241,6 +249,7 @@ def adjustment_formula(
         control = group.loc[group[treatment] == 0, outcome].mean()
         w = len(group) / len(work)
         total += w * (treated - control)
+        total0 += w * control
         weight_used += w
 
     if weight_used == 0:
@@ -254,6 +263,7 @@ def adjustment_formula(
             "dropped_rows": dropped,
             "dropped_fraction": round(dropped / len(work), 4),
         },
+        mean_control=float(total0 / weight_used),
     )
 
 
@@ -334,6 +344,26 @@ def frontdoor_g_computation(
     )
 
 
+def bootstrap(estimator, df: pd.DataFrame, n_boot: int = 500, seed: int = 0) -> list[Estimate]:
+    """The estimate on resamples with replacement; degenerate resamples are skipped."""
+    rng = np.random.default_rng(seed)
+    draws = []
+    for _ in range(n_boot):
+        idx = rng.integers(0, len(df), len(df))
+        try:
+            draws.append(estimator(df.iloc[idx]))
+        except ValueError:
+            continue
+    if len(draws) < n_boot // 2:
+        raise ValueError("too many degenerate resamples: sample or groups too small")
+    return draws
+
+
+def percentile_ci(values, alpha: float = 0.05) -> tuple[float, float]:
+    lo, hi = np.quantile(values, [alpha / 2, 1 - alpha / 2])
+    return float(lo), float(hi)
+
+
 def bootstrap_ci(
     estimator,
     df: pd.DataFrame,
@@ -342,18 +372,7 @@ def bootstrap_ci(
     seed: int = 0,
 ) -> tuple[float, float]:
     """Percentile interval over resampling with replacement."""
-    rng = np.random.default_rng(seed)
-    draws = []
-    for _ in range(n_boot):
-        idx = rng.integers(0, len(df), len(df))
-        try:
-            draws.append(estimator(df.iloc[idx]).value)
-        except ValueError:
-            continue
-    if len(draws) < n_boot // 2:
-        raise ValueError("too many degenerate resamples: sample or groups too small")
-    lo, hi = np.quantile(draws, [alpha / 2, 1 - alpha / 2])
-    return float(lo), float(hi)
+    return percentile_ci([d.value for d in bootstrap(estimator, df, n_boot, seed)], alpha)
 
 
 def refute_placebo_treatment(

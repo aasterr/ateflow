@@ -208,6 +208,7 @@ def result_payload(result: Result) -> dict:
         "method": result.method,
         "comparison": result.comparison,
         "methods_agree": result.methods_agree,
+        "sensitivity": result.sensitivity,
         "report": result.report(),
     }
 

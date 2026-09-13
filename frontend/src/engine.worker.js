@@ -19,10 +19,12 @@ async function boot(base) {
   await py.loadPackage(["numpy", "pandas"]);
 
   progress("loading ateflow");
-  const manifest = await fetch(`${base}py/manifest.json`).then((r) => r.json());
+  // the manifest is always revalidated; the files carry its version, so a new
+  // release never runs next to modules cached from the previous one
+  const manifest = await fetch(`${base}py/manifest.json`, { cache: "no-cache" }).then((r) => r.json());
   const files = await Promise.all(
     manifest.files.map(async (rel) => {
-      const res = await fetch(`${base}py/${rel}`);
+      const res = await fetch(`${base}py/${rel}?v=${manifest.version}`);
       if (!res.ok) throw new Error(`could not fetch ${rel}: ${res.status}`);
       return [rel, new Uint8Array(await res.arrayBuffer())];
     })

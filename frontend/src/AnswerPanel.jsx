@@ -63,8 +63,8 @@ function Result({ result, onGuide }) {
       <h3>How much to trust it</h3>
       <ul className="checks">
         {a.checks.map((c) => (
-          <li key={c.title + c.text} className={c.ok ? "check ok" : "check bad"}>
-            <span className="mark" aria-hidden="true">{c.ok ? "✓" : "!"}</span>
+          <li key={c.title + c.text} className={`check ${c.ok === null ? "info" : c.ok ? "ok" : "bad"}`}>
+            <span className="mark" aria-hidden="true">{c.ok === null ? "i" : c.ok ? "✓" : "!"}</span>
             <div>
               <strong>{c.title}</strong>
               <p>{c.text}</p>

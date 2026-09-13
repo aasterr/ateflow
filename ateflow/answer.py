@@ -127,7 +127,7 @@ def naive(payload: dict) -> str:
     return text + "."
 
 
-def checks(payload: dict) -> list[dict]:
+def checks(payload: dict, treatment: str = "the treatment", outcome: str = "the outcome") -> list[dict]:
     scale = _Scale(_is_binary(payload))
     adjusted = payload["adjusted"]
     out = []
@@ -176,7 +176,31 @@ def checks(payload: dict) -> list[dict]:
 
     for w in (payload.get("data_report") or {}).get("warnings", []):
         out.append({"ok": False, "title": "Data", "text": w[0].upper() + w[1:] + "."})
+
+    if sens := payload.get("sensitivity"):
+        out.append({"ok": None, "title": "Hidden confounders", "text": _hidden(payload, sens, treatment, outcome)})
     return out
+
+
+def _hidden(payload: dict, sens: dict, treatment: str, outcome: str) -> str:
+    """The E-values in words. Information, not pass/fail: no strength is safe in general."""
+    variables = payload.get("adjustment_set") or []
+    beyond = f", beyond {_names(variables)}" if variables else ""
+    if sens.get("approximate"):
+        text = (f"To explain this effect away, a confounder missing from the DAG would need a risk "
+                f"ratio of about {sens['evalue']:.1f} with both {treatment} and {outcome}{beyond} "
+                "(an approximation, since the outcome is numeric).")
+    else:
+        text = (f"To explain this effect away, a confounder missing from the DAG would need to make "
+                f"both {treatment} and {outcome} about {sens['evalue']:.1f}× more likely{beyond}.")
+    if sens.get("evalue_ci") is not None:
+        if sens["evalue_ci"] <= 1:
+            text += (" The 95% CI already includes no effect, so even a weak one could "
+                     "explain the estimate away.")
+        else:
+            unit = "" if sens.get("approximate") else "×"
+            text += f" To make the 95% CI reach no effect, {sens['evalue_ci']:.1f}{unit} would do."
+    return text
 
 
 def build(payload: dict, treatment: str, outcome: str) -> dict:
@@ -184,5 +208,5 @@ def build(payload: dict, treatment: str, outcome: str) -> dict:
         "headline": headline(payload, treatment, outcome),
         "technical": technical(payload),
         "naive": naive(payload),
-        "checks": checks(payload),
+        "checks": checks(payload, treatment, outcome),
     }
